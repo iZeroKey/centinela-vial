@@ -1,0 +1,80 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.log
+*.zip
+*.tmp
+*.bak
+
+# Archivos auxiliares locales y documentación anterior
+/_*.py
+/README.md
+/README_STABLE_V5.md
+/requirements-stable-v5.txt
+
+# Material de entrenamiento, pruebas y versiones descartadas
+dist/
+build/
+/data/
+docs/
+experiments/
+fake-version/
+informe/
+legacy/
+app/firmware/Centinela_v6a/
+app/firmware/Centinela_v6b/
+app/firmware/camara/CentinelaCamWifi_v6c/
+app/firmware/camara/CentinelaCamWifi_v7/
+app/data/asistencia/prueba/
+app/data/asistencia/README.md
+app/data/centinela/
+app/data/datasets/
+
+# Aplicaciones, demos y versiones que no pertenecen al paquete estable
+app/asistencia/
+app/asistencia_v2/
+app/asistencia_v3/
+app/asistencia_v4/
+app/asistencia_v5/
+app/asistencia_v7/
+app/asistencia_v5/agregar_alumno.py
+app/asistencia_v5/agregar_alumnos_bulk.py
+app/asistencia_v5/alumnos_nuevos.json
+app/asistencia_v5/alumnos_nuevos_template.json
+app/asistencia_v5/evaluar_reconocimiento.py
+app/asistencia_v5/generar_dataset_prueba.py
+app/asistencia_v5/generar_embedding.py
+app/asistencia_v5/identificar.py
+app/asistencia_v5/probar_esp32.py
+app/asistencia_v5/probar_stream.py
+app/asistencia_v5/reset_historial.py
+app/asistencia_v5/revalidar_embeddings.py
+app/comun/
+app/datos/
+app/demo/
+app/evaluar/
+app/empaquetar_demo.py
+
+# Entrenamiento: solo se conserva la arquitectura importada por v5
+app/entrenamiento/*
+!app/entrenamiento/
+!app/entrenamiento/entrenar_detector_facial_wider.py
+
+# Firmware de pruebas y documentación de hardware no usada por este paquete
+app/firmware/alerta_led.ino
+app/firmware/camara/CentinelaCamWifi_ESP32CAM/
+app/firmware/camara/ESP32-S3 Pinout.pdf
+app/firmware/camara/Sketch_07.1_CameraWebServer/
+app/firmware/camara/Sketch_08.1_CameraTcpServer/
+
+# Modelos que no usa la aplicación estable
+/models/ocular_v2/*
+!/models/ocular_v2/detector_seg2/
+/models/ocular_v2/detector_seg2/*
+!/models/ocular_v2/detector_seg2/best.pth
+
+# Archivo de dependencias anterior; el estable es requirements-stable-v5.txt
+/requirements.txt
