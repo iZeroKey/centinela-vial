@@ -219,6 +219,24 @@ deliberadamente en la capa de integración. La persona encargada puede llamar
 `actualizar_confirmado()` desde el callback de confirmación, sin alterar la
 lectura del stream ni el firmware de la cámara.
 
+### Simulación visual en la interfaz
+
+La pestaña `Vigilancia en vivo` incluye el widget
+`app/asistencia_v6/simulador_lcd.py`. `SimuladorLCD` lee
+`obtener_datos_lcd()` y muestra las dos filas con estilo de LCD verde. La
+ventana lo refresca desde los callbacks existentes:
+
+- `_on_progreso()`: muestra nombre y porcentaje en tiempo real.
+- `_on_confirmada()`: muestra el resultado confirmado.
+- `_quitar_fila()` y `_tras_detener()`: vuelven a `ESPERANDO...`.
+
+La ventana también revisa cada 250 ms el último progreso de cada track. Si
+una detección deja de actualizarse durante 1.5 segundos, la fila se elimina y
+la LCD vuelve a `ESPERANDO...`; así no queda visible un porcentaje antiguo.
+
+La simulación es solo visual: no envía datos a ningún dispositivo y no cambia
+la recepción de cámara.
+
 ### Importante sobre `apellidos`
 
 El esquema actual de la app solo guarda `nombre`; no existe todavía un campo

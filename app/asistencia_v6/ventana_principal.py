@@ -33,9 +33,11 @@ from hilo_trabajo import Trabajo
 from ui_util import ndarray_a_pixmap
 from dialogo_alumno import DialogoAlumno
 from panel_configuracion import PanelConfiguracion
+from simulador_lcd import SimuladorLCD
 import config as config_app
 import gestor_alumnos as gestor
 import db as db_centinela
+import estado_lcd
 
 
 class FilaProgreso(QFrame):
@@ -150,6 +152,8 @@ class TarjetaAlumno(QFrame):
 
 
 class VentanaPrincipal(QMainWindow):
+    TIEMPO_SIN_PROGRESO = 1.5
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Centinela Control v6 — Asistencia y vigilancia de aula")
@@ -165,6 +169,7 @@ class VentanaPrincipal(QMainWindow):
         self.labels_video = {}      # cam_id -> QLabel
         self.labels_estado_cam = {} # cam_id -> QLabel
         self.filas_progreso = {}    # (cam_id, track_id) -> FilaProgreso
+        self._ultimo_progreso_track = {}  # (cam_id, track_id) -> monotonic timestamp
         self.layout_rostros = None
         self._ultimo_registro = {}  # alumno_id -> timestamp
         self._intervalo_registro = float(self.cfg["asistencia"]["intervalo_antiduplicado"])
@@ -178,6 +183,10 @@ class VentanaPrincipal(QMainWindow):
         self._cargar_referencias()
 
         self._construir_ui()
+        self._temporizador_tracks = QTimer(self)
+        self._temporizador_tracks.setInterval(250)
+        self._temporizador_tracks.timeout.connect(self._revisar_tracks_perdidos)
+        self._temporizador_tracks.start()
         self._actualizar_galeria()
         self._actualizar_historial()
 
@@ -270,6 +279,9 @@ class VentanaPrincipal(QMainWindow):
         layout_controles.addWidget(self.btn_recargar)
 
         layout_derecho.addWidget(grupo_controles)
+
+        self.simulador_lcd = SimuladorLCD()
+        layout_derecho.addWidget(self.simulador_lcd)
 
         grupo_progreso = QGroupBox("Verificando rostros")
         layout_progreso = QVBoxLayout(grupo_progreso)
@@ -564,6 +576,8 @@ class VentanaPrincipal(QMainWindow):
         self._tras_detener()
 
     def _tras_detener(self):
+        estado_lcd.actualizar_esperando()
+        self._actualizar_simulador_lcd()
         self.btn_iniciar.setEnabled(True)
         self.btn_detener.setEnabled(False)
         self.lbl_estado.setText("Cámaras: detenidas")
@@ -581,7 +595,19 @@ class VentanaPrincipal(QMainWindow):
         for fila in self.filas_progreso.values():
             fila.setParent(None)
         self.filas_progreso.clear()
+        self._ultimo_progreso_track.clear()
         self.lbl_sin_rostros.show()
+
+    def _revisar_tracks_perdidos(self):
+        """Quita filas sin progreso reciente para no mostrar un estado congelado."""
+        ahora = time.monotonic()
+        perdidos = [
+            (cam_id, track_id)
+            for (cam_id, track_id), ultimo in self._ultimo_progreso_track.items()
+            if ahora - ultimo > self.TIEMPO_SIN_PROGRESO
+        ]
+        for cam_id, track_id in perdidos:
+            self._quitar_fila(cam_id, track_id)
 
     def _repolish(self, widget):
         widget.style().unpolish(widget)
@@ -592,6 +618,10 @@ class VentanaPrincipal(QMainWindow):
             if c.get("id") == cam_id:
                 return c.get("nombre") or str(cam_id)
         return str(cam_id)
+
+    def _actualizar_simulador_lcd(self):
+        if hasattr(self, "simulador_lcd"):
+            self.simulador_lcd.actualizar()
 
     # ---------------- Señales de cámaras ----------------
     def _on_frame(self, cam_id, frame, _detecciones):
@@ -624,6 +654,9 @@ class VentanaPrincipal(QMainWindow):
             self._tras_detener()
 
     def _on_progreso(self, cam_id, track_id, progreso, nombre, alumno_id, _caja):
+        self._ultimo_progreso_track[(cam_id, track_id)] = time.monotonic()
+        estado_lcd.actualizar_procesamiento(nombre=nombre, progreso=progreso)
+        self._actualizar_simulador_lcd()
         self.lbl_sin_rostros.hide()
         clave = (cam_id, track_id)
         if clave not in self.filas_progreso:
@@ -635,6 +668,8 @@ class VentanaPrincipal(QMainWindow):
             progreso, f"{progreso * seg_confirm:.1f} s / {seg_confirm:.1f} s")
 
     def _on_confirmada(self, cam_id, track_id, nombre, alumno_id, similitud):
+        estado_lcd.actualizar_confirmado(nombre=nombre)
+        self._actualizar_simulador_lcd()
         clave = (cam_id, track_id)
         if clave in self.filas_progreso:
             self.filas_progreso[clave].confirmado()
@@ -655,6 +690,7 @@ class VentanaPrincipal(QMainWindow):
         clave = (cam_id, track_id)
         if clave in self.filas_progreso:
             fila = self.filas_progreso.pop(clave)
+            self._ultimo_progreso_track.pop(clave, None)
             fila.setParent(None)
             for i in range(self.layout_rostros.count()):
                 item = self.layout_rostros.itemAt(i)
@@ -662,6 +698,8 @@ class VentanaPrincipal(QMainWindow):
                     self.layout_rostros.takeAt(i)
                     break
         if not self.filas_progreso:
+            estado_lcd.actualizar_esperando()
+            self._actualizar_simulador_lcd()
             self.lbl_sin_rostros.show()
 
     # ---------------- Captura pausa/reanudación ----------------
