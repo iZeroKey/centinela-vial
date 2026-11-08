@@ -45,115 +45,174 @@ from enlace_wifi import EnlaceWifi
 
 
 class FilaProgreso(QFrame):
-    """Fila individual con nombre y barra de progreso para una cara en verificación."""
+    """Fila de verificacion de un alumno: foto de referencia, datos, barra y asistencia."""
 
-    def __init__(self, track_id, nombre, parent=None):
+    def __init__(self, alumno_id, nombre, parent=None):
         super().__init__(parent)
-        self.track_id = track_id
+        self.alumno_id = alumno_id
+        self.track_keys = set()
         self.setFrameShape(QFrame.Shape.StyledPanel)
-        self.setStyleSheet("FilaProgreso { background: #1a1a1a; border: 1px solid #333333; border-radius: 8px; }")
+        self.setStyleSheet(
+            "FilaProgreso { background: #1a1a1a; border: 1px solid #333333; border-radius: 10px; }")
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(12, 8, 12, 8)
-        layout.setSpacing(12)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(14)
 
+        # Foto de referencia
+        self.lbl_foto = QLabel()
+        self.lbl_foto.setFixedSize(64, 64)
+        self.lbl_foto.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_foto.setStyleSheet(
+            "background: #0d0d0d; border: 1px solid #333333; border-radius: 8px; color: #6b6b6b;")
+        self._cargar_foto(alumno_id)
+        layout.addWidget(self.lbl_foto)
+
+        # Columna de datos
+        col = QVBoxLayout()
+        col.setSpacing(4)
         self.lbl_nombre = QLabel(nombre)
-        self.lbl_nombre.setStyleSheet("color:#ededed; font-weight: bold; background: transparent; border: none;")
-        self.lbl_nombre.setMinimumWidth(160)
+        self.lbl_nombre.setStyleSheet(
+            "color: #ededed; font-weight: bold; background: transparent; border: none; font-size: 14px;")
+        col.addWidget(self.lbl_nombre)
 
+        self.lbl_curso = QLabel("")
+        self.lbl_curso.setStyleSheet(
+            "color: #9a9a9a; background: transparent; border: none; font-size: 12px;")
+        col.addWidget(self.lbl_curso)
+
+        fila_barra = QHBoxLayout()
         self.barra = QProgressBar()
-        self.barra.setRange(0, 100)
-        self.barra.setValue(0)
-        self.barra.setFixedWidth(220)
-
+        self.barra.setMaximum(100)
+        self.barra.setTextVisible(False)
+        self.barra.setFixedHeight(12)
+        fila_barra.addWidget(self.barra, 1)
         self.lbl_estado = QLabel("Verificando...")
-        self.lbl_estado.setStyleSheet("color:#a3a3a3; font-size: 12px; background: transparent; border: none;")
+        self.lbl_estado.setStyleSheet(
+            "color: #ededed; background: transparent; border: none; font-size: 12px;")
+        self.lbl_estado.setMinimumWidth(130)
+        fila_barra.addWidget(self.lbl_estado)
+        col.addLayout(fila_barra)
 
-        layout.addWidget(self.lbl_nombre, 0)
-        layout.addWidget(self.barra, 1)
-        layout.addWidget(self.lbl_estado, 0)
+        self.lbl_asistencia = QLabel("")
+        self.lbl_asistencia.setStyleSheet(
+            "color: #5fd08b; background: transparent; border: none; font-size: 12px;")
+        col.addWidget(self.lbl_asistencia)
 
-    def actualizar(self, progreso_0_1, estado_texto):
-        self.barra.setValue(int(progreso_0_1 * 100))
-        self.lbl_estado.setText(estado_texto)
-        if progreso_0_1 >= 1.0:
-            self.barra.setStyleSheet("QProgressBar::chunk { background: #5fd08b; border-radius: 6px; }")
-            self.lbl_estado.setStyleSheet("color:#5fd08b; font-size: 12px; background: transparent; border: none;")
-        else:
-            self.barra.setStyleSheet("QProgressBar::chunk { background: #e6e6e6; border-radius: 6px; }")
-            self.lbl_estado.setStyleSheet("color:#a3a3a3; font-size: 12px; background: transparent; border: none;")
+        layout.addLayout(col, 1)
+
+        self._cargar_datos(alumno_id)
+
+    def _cargar_foto(self, alumno_id):
+        if not alumno_id:
+            self.lbl_foto.setText("?")
+            return
+        try:
+            import gestor_alumnos as gestor
+            ruta = gestor.ruta_foto_absoluta(
+                (gestor.obtener(alumno_id) or {}).get("foto_referencia"))
+            if ruta and os.path.isfile(ruta):
+                pix = QPixmap(ruta).scaled(
+                    64, 64, Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation)
+                self.lbl_foto.setPixmap(pix)
+                return
+        except Exception:
+            pass
+        self.lbl_foto.setText("?")
+
+    def _cargar_datos(self, alumno_id):
+        if not alumno_id:
+            self.lbl_curso.setText("")
+            self.lbl_asistencia.setText("")
+            return
+        try:
+            import gestor_alumnos as gestor
+            import db as db_centinela
+            alum = gestor.obtener(alumno_id)
+            if alum:
+                curso = str(alum.get("curso", "")).strip()
+                grupo = str(alum.get("grupo", "")).strip()
+                self.lbl_curso.setText(" \u00b7 ".join(x for x in (curso, grupo) if x))
+            # asistencia del dia
+            try:
+                hoy = db_centinela.obtener_estado_hoy()
+                for row in hoy:
+                    if row.get("alumno_id") == alumno_id:
+                        marcas = row.get("marcas", 0)
+                        entrada = row.get("entrada_abierta") or row.get("ultima_salida")
+                        if marcas and marcas > 0:
+                            texto = "Presente"
+                            if entrada:
+                                texto += f"  ({str(entrada)[11:16]})"
+                            self.lbl_asistencia.setText(texto)
+                        else:
+                            self.lbl_asistencia.setText("Sin registro hoy")
+                        break
+                else:
+                    self.lbl_asistencia.setText("Sin registro hoy")
+            except Exception:
+                self.lbl_asistencia.setText("")
+        except Exception:
+            pass
+
+    def actualizar(self, progreso, texto_estado):
+        self.barra.setValue(int(progreso * 100))
+        self.lbl_estado.setText(texto_estado)
 
     def confirmado(self):
         self.barra.setValue(100)
-        self.barra.setStyleSheet("QProgressBar::chunk { background: #5fd08b; border-radius: 6px; }")
         self.lbl_estado.setText("Confirmado")
-        self.lbl_estado.setStyleSheet("color:#5fd08b; font-weight: bold; background: transparent; border: none;")
+        self.lbl_estado.setStyleSheet(
+            "color: #5fd08b; background: transparent; border: none; font-size: 12px; font-weight: bold;")
 
 
 class TarjetaAlumno(QFrame):
-    """Tarjeta clicable de la galería de alumnos. Nunca muestra el ID."""
-
+    """Tarjeta clickable de alumno para la galeria (foto + nombre)."""
     clickeado = pyqtSignal(dict)
 
     def __init__(self, alumno, parent=None):
         super().__init__(parent)
         self.alumno = alumno
-        self.setObjectName("card")
-        self.setFixedSize(192, 262)
+        self.setFrameShape(QFrame.Shape.StyledPanel)
+        self.setStyleSheet(
+            "TarjetaAlumno { background: #1a1a1a; border: 1px solid #333333; "
+            "border-radius: 10px; } TarjetaAlumno:hover { border-color: #f2f2f2; }")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFixedSize(120, 150)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(6)
 
-        v = QVBoxLayout(self)
-        v.setContentsMargins(10, 10, 10, 10)
-        v.setSpacing(6)
+        lbl_foto = QLabel()
+        lbl_foto.setFixedSize(96, 96)
+        lbl_foto.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl_foto.setStyleSheet(
+            "background: #0d0d0d; border: 1px solid #333333; border-radius: 8px; "
+            "color: #6b6b6b;")
+        try:
+            ruta = gestor.ruta_foto_absoluta(alumno.get("foto_referencia"))
+            if ruta and os.path.isfile(ruta):
+                pix = QPixmap(ruta).scaled(
+                    96, 96, Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation)
+                lbl_foto.setPixmap(pix)
+            else:
+                lbl_foto.setText("?")
+        except Exception:
+            lbl_foto.setText("?")
+        layout.addWidget(lbl_foto, 0, Qt.AlignmentFlag.AlignCenter)
 
-        estilo_imagen = "background: #0d0d0d; border: 1px solid #262626; border-radius: 8px;"
-        img = QLabel()
-        img.setFixedSize(170, 168)
-        img.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        ruta = gestor.ruta_foto_absoluta(alumno.get("foto_referencia"))
-        pix = QPixmap(ruta) if ruta else QPixmap()
-        if not pix.isNull():
-            img.setPixmap(pix.scaled(
-                168, 168,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            ))
-            img.setStyleSheet(estilo_imagen)
-        else:
-            img.setText("Sin foto")
-            img.setStyleSheet(estilo_imagen + " color: #5a5a5a; font-size: 12px;")
-        v.addWidget(img, 0, Qt.AlignmentFlag.AlignHCenter)
-
-        nombre = (alumno.get("nombre") or "").strip() or "(sin nombre)"
-        lbl_nombre = QLabel(nombre)
+        lbl_nombre = QLabel(str(alumno.get("nombre", "")))
+        lbl_nombre.setStyleSheet(
+            "color: #ededed; font-weight: bold; background: transparent; "
+            "border: none; font-size: 12px;")
+        lbl_nombre.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lbl_nombre.setWordWrap(True)
-        lbl_nombre.setStyleSheet("color:#ededed; font-size: 13px; font-weight: bold; background: transparent; border: none;")
-        v.addWidget(lbl_nombre)
-
-        info = []
-        if (alumno.get("curso") or "").strip():
-            info.append(alumno["curso"].strip())
-        if (alumno.get("grupo") or "").strip():
-            info.append(alumno["grupo"].strip())
-        if alumno.get("estado") == "inactivo":
-            info.append("Inactivo")
-        lbl_extra = QLabel(" · ".join(info))
-        lbl_extra.setStyleSheet(
-            "color:" + ("#e58a8a" if alumno.get("estado") == "inactivo" else "#8a8a8a")
-            + "; font-size: 12px; background: transparent; border: none;")
-        lbl_extra.setWordWrap(True)
-        v.addWidget(lbl_extra)
-
-        if alumno.get("embedding") is None:
-            lbl_aviso = QLabel("⚠ sin embedding")
-            lbl_aviso.setStyleSheet("color:#e5c07b; font-size: 11px; background: transparent; border: none;")
-            v.addWidget(lbl_aviso)
-
-        v.addStretch(1)
+        layout.addWidget(lbl_nombre)
 
     def mousePressEvent(self, event):
         self.clickeado.emit(self.alumno)
         super().mousePressEvent(event)
-
 
 class VentanaPrincipal(QMainWindow):
     TIEMPO_SIN_PROGRESO = 2.5
@@ -187,6 +246,9 @@ class VentanaPrincipal(QMainWindow):
         # Prioridad de LCD por tamaño de cara (el más grande tiene prioridad)
         self._lcd_track_prioritario = None
         self._lcd_area_prioritaria = 0.0
+        # Consolidación de tracks por alumno (para una sola fila por alumno)
+        self._track_a_alumno = {}
+        self._alumno_tracks = {}
 
         # Trabajos en segundo plano
         self._trabajo_recarga = None
@@ -766,13 +828,23 @@ class VentanaPrincipal(QMainWindow):
             self._lcd_area_prioritaria = area
 
         self.lbl_sin_rostros.hide()
-        clave = (cam_id, track_id)
-        if clave not in self.filas_progreso:
-            fila = FilaProgreso(track_id, f"{nombre} · {self._nombre_cam(cam_id)}")
-            self.filas_progreso[clave] = fila
+
+        # Consolidar por alumno: una sola fila por alumno, aunque se detecte
+        # en varias camaras a la vez.
+        if alumno_id:
+            key = ("alumno", alumno_id)
+            self._track_a_alumno[(cam_id, track_id)] = alumno_id
+            self._alumno_tracks.setdefault(alumno_id, set()).add((cam_id, track_id))
+        else:
+            key = ("track", cam_id, track_id)
+
+        if key not in self.filas_progreso:
+            fila = FilaProgreso(alumno_id, nombre or "Desconocido")
+            self.filas_progreso[key] = fila
             self.layout_rostros.insertWidget(self.layout_rostros.count() - 1, fila)
+
         seg_confirm = float(self.cfg["asistencia"]["segundos_confirmacion"])
-        self.filas_progreso[clave].actualizar(
+        self.filas_progreso[key].actualizar(
             progreso, f"{progreso * seg_confirm:.1f} s / {seg_confirm:.1f} s")
 
     def _on_confirmada(self, cam_id, track_id, nombre, alumno_id, similitud):
@@ -781,9 +853,13 @@ class VentanaPrincipal(QMainWindow):
         self._actualizar_simulador_lcd()
         self._lcd_track_prioritario = (cam_id, track_id)
         self._lcd_area_prioritaria = float("inf")
-        clave = (cam_id, track_id)
-        if clave in self.filas_progreso:
-            self.filas_progreso[clave].confirmado()
+        if alumno_id:
+            key = ("alumno", alumno_id)
+        else:
+            key = ("track", cam_id, track_id)
+        if key in self.filas_progreso:
+            self.filas_progreso[key].confirmado()
+            self.filas_progreso[key]._cargar_datos(alumno_id)
 
         ahora_ts = time.time()
         ultimo = self._ultimo_registro.get(alumno_id, 0)
@@ -798,13 +874,30 @@ class VentanaPrincipal(QMainWindow):
         QTimer.singleShot(2000, lambda c=cam_id, t=track_id: self._quitar_fila(c, t))
 
     def _quitar_fila(self, cam_id, track_id):
-        clave = (cam_id, track_id)
-        if self._lcd_track_prioritario == clave:
+        # Determinar alumno asociado al track
+        alumno_id = self._track_a_alumno.pop((cam_id, track_id), None)
+        if alumno_id is not None:
+            tracks = self._alumno_tracks.get(alumno_id, set())
+            tracks.discard((cam_id, track_id))
+            if tracks:
+                self._alumno_tracks[alumno_id] = tracks
+                # Aun hay tracks activos del alumno: no quitar la fila.
+                if self._lcd_track_prioritario == (cam_id, track_id):
+                    self._lcd_track_prioritario = None
+                    self._lcd_area_prioritaria = 0.0
+                return
+            self._alumno_tracks.pop(alumno_id, None)
+            key = ("alumno", alumno_id)
+        else:
+            key = ("track", cam_id, track_id)
+
+        if self._lcd_track_prioritario == (cam_id, track_id):
             self._lcd_track_prioritario = None
             self._lcd_area_prioritaria = 0.0
-        if clave in self.filas_progreso:
-            fila = self.filas_progreso.pop(clave)
-            self._ultimo_progreso_track.pop(clave, None)
+
+        if key in self.filas_progreso:
+            fila = self.filas_progreso.pop(key)
+            self._ultimo_progreso_track.pop((cam_id, track_id), None)
             fila.setParent(None)
             for i in range(self.layout_rostros.count()):
                 item = self.layout_rostros.itemAt(i)
