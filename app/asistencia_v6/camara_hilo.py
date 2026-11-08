@@ -40,7 +40,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from rostros import pipeline_embeddings
 
 CONFIRM_SEG = 3.0          # segundos seguidos necesarios para confirmar
-CENTRO_DIST_MAX = 100.0     # px máximo entre frames para considerar misma cara
+CENTRO_DIST_MAX = 100.0
+GRACE_SEG = 0.8     # px máximo entre frames para considerar misma cara
 
 
 class _Track:
@@ -471,9 +472,14 @@ class CamaraHilo(QThread):
                     tr.track_id, 0.0, tr.nombre, tr.alumno_id, caja
                 )
 
-        # Limpiar tracks que ya no se ven (se fueron de pantalla)
+        # Limpiar tracks que ya no se ven (se fueron de pantalla).
+        # Grace period: no borrar de inmediato si la cara se pierde por un
+        # instante; mantener el track un poco para no resetear el escaneo.
         for tid in list(self._tracks.keys()):
             if tid not in tracks_vistos:
+                tr = self._tracks[tid]
+                if time.time() - tr.t_ultimo < GRACE_SEG:
+                    continue
                 del self._tracks[tid]
 
         # Dibujar anotaciones en el frame y preparar lista de detecciones

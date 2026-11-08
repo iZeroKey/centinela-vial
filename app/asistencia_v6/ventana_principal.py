@@ -156,7 +156,7 @@ class TarjetaAlumno(QFrame):
 
 
 class VentanaPrincipal(QMainWindow):
-    TIEMPO_SIN_PROGRESO = 1.5
+    TIEMPO_SIN_PROGRESO = 2.5
 
     def __init__(self):
         super().__init__()
