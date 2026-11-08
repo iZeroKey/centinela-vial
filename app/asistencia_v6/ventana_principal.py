@@ -184,6 +184,9 @@ class VentanaPrincipal(QMainWindow):
         self._camaras_pausadas = []  # cam_ids detenidos temporalmente por una captura
         self._enlace_wifi = None
         self._toasts = []
+        # Prioridad de LCD por tamaño de cara (el más grande tiene prioridad)
+        self._lcd_track_prioritario = None
+        self._lcd_area_prioritaria = 0.0
 
         # Trabajos en segundo plano
         self._trabajo_recarga = None
@@ -740,8 +743,28 @@ class VentanaPrincipal(QMainWindow):
             self.cfg.get("asistencia", {}).get("umbral_lcd_nombre", 0.30))
         estado_lcd.configurar_duracion_resultado_lcd(
             self.cfg.get("asistencia", {}).get("duracion_resultado_lcd", 3.0))
-        estado_lcd.actualizar_procesamiento(nombre=nombre, progreso=progreso)
-        self._actualizar_simulador_lcd()
+
+        # Área de la cara detectada (para prioridad por tamaño en el LCD)
+        area = 0.0
+        if _caja is not None:
+            try:
+                x1, y1, x2, y2 = _caja
+                area = max(0.0, float((x2 - x1) * (y2 - y1)))
+            except Exception:
+                area = 0.0
+
+        # Solo el track prioritario (el de mayor área) actualiza el LCD.
+        es_prioritario = (
+            self._lcd_track_prioritario is None
+            or (cam_id, track_id) == self._lcd_track_prioritario
+            or area > self._lcd_area_prioritaria * 1.1
+        )
+        if es_prioritario:
+            estado_lcd.actualizar_procesamiento(nombre=nombre, progreso=progreso)
+            self._actualizar_simulador_lcd()
+            self._lcd_track_prioritario = (cam_id, track_id)
+            self._lcd_area_prioritaria = area
+
         self.lbl_sin_rostros.hide()
         clave = (cam_id, track_id)
         if clave not in self.filas_progreso:
@@ -753,8 +776,11 @@ class VentanaPrincipal(QMainWindow):
             progreso, f"{progreso * seg_confirm:.1f} s / {seg_confirm:.1f} s")
 
     def _on_confirmada(self, cam_id, track_id, nombre, alumno_id, similitud):
+        # Un confirmado tiene prioridad máxima en el LCD.
         estado_lcd.actualizar_confirmado(nombre=nombre)
         self._actualizar_simulador_lcd()
+        self._lcd_track_prioritario = (cam_id, track_id)
+        self._lcd_area_prioritaria = float("inf")
         clave = (cam_id, track_id)
         if clave in self.filas_progreso:
             self.filas_progreso[clave].confirmado()
@@ -773,6 +799,9 @@ class VentanaPrincipal(QMainWindow):
 
     def _quitar_fila(self, cam_id, track_id):
         clave = (cam_id, track_id)
+        if self._lcd_track_prioritario == clave:
+            self._lcd_track_prioritario = None
+            self._lcd_area_prioritaria = 0.0
         if clave in self.filas_progreso:
             fila = self.filas_progreso.pop(clave)
             self._ultimo_progreso_track.pop(clave, None)
