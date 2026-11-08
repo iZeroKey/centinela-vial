@@ -61,9 +61,9 @@ def _progreso_0_100(progreso):
 def _filas_para(estado, nombre, apellidos, progreso, motivo):
     if estado == "procesando":
         if progreso < UMBRAL_NOMBRE_LCD * 100.0:
-            fila_1 = "PROCESANDO"
+            fila_1 = "IDENTIFICANDO"
         else:
-            fila_1 = nombre or "PROCESANDO"
+            fila_1 = nombre or "IDENTIFICADO"
         fila_2 = f"PROCESANDO {progreso:3.0f}%"
     elif estado == "confirmado":
         fila_1 = nombre or "IDENTIFICADO"

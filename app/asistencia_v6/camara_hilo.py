@@ -480,14 +480,32 @@ class CamaraHilo(QThread):
         detecciones = []
         for det in identificadas:
             x1, y1, x2, y2 = [int(v) for v in det["caja"]]
-            cv2.rectangle(anotado, (x1, y1), (x2, y2), det["color"], 2)
+            # Overlay moderno: solo esquinas (corner brackets) con margen,
+            # en lugar del rectangulo completo. Mas limpio y menos invasivo.
+            m = 8
+            ax1, ay1, ax2, ay2 = x1 - m, y1 - m, x2 + m, y2 + m
+            L = max(18, (ax2 - ax1) // 5, (ay2 - ay1) // 5)
+            color = det["color"]
+            thick = 3
+            # superior izquierda
+            cv2.line(anotado, (ax1, ay1), (ax1 + L, ay1), color, thick)
+            cv2.line(anotado, (ax1, ay1), (ax1, ay1 + L), color, thick)
+            # superior derecha
+            cv2.line(anotado, (ax2, ay1), (ax2 - L, ay1), color, thick)
+            cv2.line(anotado, (ax2, ay1), (ax2, ay1 + L), color, thick)
+            # inferior izquierda
+            cv2.line(anotado, (ax1, ay2), (ax1 + L, ay2), color, thick)
+            cv2.line(anotado, (ax1, ay2), (ax1, ay2 - L), color, thick)
+            # inferior derecha
+            cv2.line(anotado, (ax2, ay2), (ax2 - L, ay2), color, thick)
+            cv2.line(anotado, (ax2, ay2), (ax2, ay2 - L), color, thick)
             cv2.putText(
                 anotado,
-                f"{det['nombre']} {det['sim']:.2f}",
-                (x1, max(y1 - 10, 20)),
+                f"{det['nombre']}  {det['sim']:.2f}",
+                (ax1, max(ay1 - 12, 24)),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.6,
-                det["color"],
+                0.65,
+                color,
                 2,
             )
             detecciones.append({
