@@ -152,10 +152,33 @@ def _embedding_de(img_bgr):
 
 # ---------------- Operaciones ----------------
 
-def agregar(nombre, curso="", grupo="", imagen=None, ruta_imagen=None):
+_CAMPOS_ALUMNO = (
+    "nombre", "apellidos", "dni", "fecha_nacimiento", "sexo", "telefono", "email",
+    "tutor_nombre", "tutor_telefono", "direccion", "curso", "grupo", "seccion",
+    "condicion", "observaciones",
+)
+
+
+def _normalizar_alumno(alumno):
+    """Asegura que el dict del alumno tenga todas las claves esperadas."""
+    for c in _CAMPOS_ALUMNO:
+        alumno.setdefault(c, "")
+    alumno.setdefault("alumno_id", "")
+    alumno.setdefault("foto_referencia", None)
+    alumno.setdefault("embedding", None)
+    alumno.setdefault("estado", "activo")
+    alumno.setdefault("fecha_registro", datetime.now().isoformat())
+    alumno.setdefault("actualizado_en", "")
+    if not alumno.get("condicion"):
+        alumno["condicion"] = "regular"
+    return alumno
+
+
+def agregar(nombre, curso="", grupo="", imagen=None, ruta_imagen=None, **extra):
     """
     Alta de alumno con foto (ndarray BGR o ruta). Genera el embedding;
     si no se detecta cara, no guarda nada.
+    Acepta campos extra (apellidos, dni, ...) via kwargs.
     Devuelve (alumno|None, mensaje).
     """
     if imagen is None and ruta_imagen:
@@ -183,7 +206,12 @@ def agregar(nombre, curso="", grupo="", imagen=None, ruta_imagen=None):
             "embedding": emb.tolist(),
             "estado": "activo",
             "fecha_registro": datetime.now().isoformat(),
+            "actualizado_en": datetime.now().isoformat(),
         }
+        for c in _CAMPOS_ALUMNO:
+            if c in extra and extra[c] is not None:
+                alumno[c] = extra[c]
+        _normalizar_alumno(alumno)
         data["alumnos"].append(alumno)
         _escribir_json(data)
     _sincronizar()
@@ -195,10 +223,11 @@ def agregar(nombre, curso="", grupo="", imagen=None, ruta_imagen=None):
 
 
 def editar(alumno_id, nombre=None, curso=None, grupo=None,
-           imagen=None, ruta_imagen=None):
+           imagen=None, ruta_imagen=None, **extra):
     """
-    Edición de datos y/o foto. Con imagen nueva valida la cara y regenera
+    Edicion de datos y/o foto. Con imagen nueva valida la cara y regenera
     el embedding; si falla, no modifica nada.
+    Acepta campos extra (apellidos, dni, ...) via kwargs.
     Devuelve (ok, mensaje).
     """
     if imagen is None and ruta_imagen:
@@ -216,13 +245,19 @@ def editar(alumno_id, nombre=None, curso=None, grupo=None,
         alumno = next((a for a in data.get("alumnos", [])
                        if a.get("alumno_id") == alumno_id), None)
         if alumno is None:
-            return False, "No se encontró el alumno."
-        if nombre is not None and nombre.strip():
-            alumno["nombre"] = nombre.strip()
+            return False, "No se encontro el alumno."
+        if nombre is not None and str(nombre).strip():
+            alumno["nombre"] = str(nombre).strip()
         if curso is not None:
-            alumno["curso"] = curso.strip()
+            alumno["curso"] = str(curso).strip()
         if grupo is not None:
-            alumno["grupo"] = grupo.strip()
+            alumno["grupo"] = str(grupo).strip()
+        for c in _CAMPOS_ALUMNO:
+            if c in extra and extra[c] is not None:
+                val = extra[c]
+                if isinstance(val, str):
+                    val = val.strip()
+                alumno[c] = val
         if imagen is not None:
             try:
                 _guardar_imagen_jpg(imagen, alumno_id)
@@ -230,6 +265,8 @@ def editar(alumno_id, nombre=None, curso=None, grupo=None,
                 return False, str(e)
             alumno["foto_referencia"] = f"referencia/{alumno_id}.jpg"
             alumno["embedding"] = emb.tolist()
+        alumno["actualizado_en"] = datetime.now().isoformat()
+        _normalizar_alumno(alumno)
         _escribir_json(data)
     _sincronizar()
 

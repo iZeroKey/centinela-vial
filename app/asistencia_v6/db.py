@@ -27,7 +27,56 @@ DB_PATH = os.path.join(_DB_DIR, "centinela.sqlite")
 def _conectar():
     con = sqlite3.connect(DB_PATH)
     con.row_factory = sqlite3.Row
+    try:
+        con.execute("PRAGMA foreign_keys=ON")
+    except Exception:
+        pass
     return con
+
+
+_NUEVAS_COLUMNAS_ALUMNOS = [
+    ("apellidos", "TEXT DEFAULT ''"),
+    ("dni", "TEXT DEFAULT ''"),
+    ("fecha_nacimiento", "TEXT DEFAULT ''"),
+    ("sexo", "TEXT DEFAULT ''"),
+    ("telefono", "TEXT DEFAULT ''"),
+    ("email", "TEXT DEFAULT ''"),
+    ("tutor_nombre", "TEXT DEFAULT ''"),
+    ("tutor_telefono", "TEXT DEFAULT ''"),
+    ("direccion", "TEXT DEFAULT ''"),
+    ("seccion", "TEXT DEFAULT ''"),
+    ("condicion", "TEXT DEFAULT 'regular'"),
+    ("observaciones", "TEXT DEFAULT ''"),
+    ("actualizado_en", "TEXT DEFAULT ''"),
+]
+
+
+def _migrar_alumnos(cur):
+    """Añade columnas nuevas a alumnos si no existen (idempotente)."""
+    try:
+        cur.execute("PRAGMA table_info(alumnos)")
+        existentes = {row[1] for row in cur.fetchall()}
+    except Exception:
+        return
+    for col, tipo in _NUEVAS_COLUMNAS_ALUMNOS:
+        if col not in existentes:
+            try:
+                cur.execute(f"ALTER TABLE alumnos ADD COLUMN {col} {tipo}")
+            except Exception:
+                pass
+    # índice único para DNI (solo si no existe)
+    try:
+        cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_alumnos_dni ON alumnos(dni) WHERE dni <> ''")
+    except Exception:
+        pass
+    try:
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_alumnos_curso ON alumnos(curso)")
+    except Exception:
+        pass
+    try:
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_alumnos_estado ON alumnos(estado)")
+    except Exception:
+        pass
 
 
 def init_db():
@@ -37,12 +86,27 @@ def init_db():
     CREATE TABLE IF NOT EXISTS alumnos (
         alumno_id   TEXT PRIMARY KEY,
         nombre      TEXT,
+        apellidos   TEXT DEFAULT '',
+        dni         TEXT DEFAULT '',
+        fecha_nacimiento TEXT DEFAULT '',
+        sexo        TEXT DEFAULT '',
+        telefono    TEXT DEFAULT '',
+        email       TEXT DEFAULT '',
+        tutor_nombre TEXT DEFAULT '',
+        tutor_telefono TEXT DEFAULT '',
+        direccion   TEXT DEFAULT '',
         curso       TEXT DEFAULT '',
         grupo       TEXT DEFAULT '',
+        seccion     TEXT DEFAULT '',
+        condicion   TEXT DEFAULT 'regular',
         foto_referencia TEXT,
+        observaciones TEXT DEFAULT '',
         estado      TEXT DEFAULT 'activo',
-        fecha_registro TEXT
+        fecha_registro TEXT,
+        actualizado_en TEXT DEFAULT ''
     )""")
+    # Migracion idempotente para BDs antiguas
+    _migrar_alumnos(cur)
     cur.execute("""
     CREATE TABLE IF NOT EXISTS asistencia (
         id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -76,18 +140,53 @@ def sincronizar_alumnos(json_path):
     cur = con.cursor()
     for a in data.get("alumnos", []):
         cur.execute("""
-        INSERT INTO alumnos (alumno_id, nombre, curso, grupo, foto_referencia, estado, fecha_registro)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO alumnos (alumno_id, nombre, apellidos, dni, fecha_nacimiento, sexo,
+            telefono, email, tutor_nombre, tutor_telefono, direccion, curso, grupo, seccion,
+            condicion, foto_referencia, observaciones, estado, fecha_registro, actualizado_en)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(alumno_id) DO UPDATE SET
             nombre=excluded.nombre,
+            apellidos=excluded.apellidos,
+            dni=excluded.dni,
+            fecha_nacimiento=excluded.fecha_nacimiento,
+            sexo=excluded.sexo,
+            telefono=excluded.telefono,
+            email=excluded.email,
+            tutor_nombre=excluded.tutor_nombre,
+            tutor_telefono=excluded.tutor_telefono,
+            direccion=excluded.direccion,
             curso=excluded.curso,
             grupo=excluded.grupo,
+            seccion=excluded.seccion,
+            condicion=excluded.condicion,
             foto_referencia=excluded.foto_referencia,
+            observaciones=excluded.observaciones,
             estado=excluded.estado,
-            fecha_registro=excluded.fecha_registro
-        """, (a["alumno_id"], a.get("nombre"), a.get("curso", ""), a.get("grupo", ""),
-              a.get("foto_referencia"), a.get("estado", "activo"), a.get("fecha_registro")))
+            actualizado_en=excluded.actualizado_en
+        """, (
+            a.get("alumno_id"),
+            a.get("nombre"),
+            a.get("apellidos", ""),
+            a.get("dni", ""),
+            a.get("fecha_nacimiento", ""),
+            a.get("sexo", ""),
+            a.get("telefono", ""),
+            a.get("email", ""),
+            a.get("tutor_nombre", ""),
+            a.get("tutor_telefono", ""),
+            a.get("direccion", ""),
+            a.get("curso", ""),
+            a.get("grupo", ""),
+            a.get("seccion", ""),
+            a.get("condicion", "regular"),
+            a.get("foto_referencia"),
+            a.get("observaciones", ""),
+            a.get("estado", "activo"),
+            a.get("fecha_registro"),
+            a.get("actualizado_en", ""),
+        ))
     con.commit()
+
     con.close()
 
 

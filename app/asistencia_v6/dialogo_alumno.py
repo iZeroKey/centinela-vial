@@ -50,8 +50,22 @@ class DialogoAlumno(QDialog):
         layout.setContentsMargins(20, 20, 20, 20)
 
         self.edit_nombre = QLineEdit(self._alumno.get("nombre", "") or "")
+        self.edit_apellidos = QLineEdit(self._alumno.get("apellidos", "") or "")
+        self.edit_dni = QLineEdit(self._alumno.get("dni", "") or "")
         self.edit_curso = QLineEdit(self._alumno.get("curso", "") or "")
         self.edit_grupo = QLineEdit(self._alumno.get("grupo", "") or "")
+        self.edit_seccion = QLineEdit(self._alumno.get("seccion", "") or "")
+        self.edit_telefono = QLineEdit(self._alumno.get("telefono", "") or "")
+        self.edit_email = QLineEdit(self._alumno.get("email", "") or "")
+        self.edit_tutor = QLineEdit(self._alumno.get("tutor_nombre", "") or "")
+        self.edit_tutor_tel = QLineEdit(self._alumno.get("tutor_telefono", "") or "")
+        from PyQt6.QtWidgets import QComboBox, QTextEdit
+        self.combo_condicion = QComboBox()
+        self.combo_condicion.addItems(["regular", "irregular"])
+        self.combo_condicion.setCurrentText(self._alumno.get("condicion", "regular") or "regular")
+        self.edit_observaciones = QTextEdit()
+        self.edit_observaciones.setPlainText(self._alumno.get("observaciones", "") or "")
+        self.edit_observaciones.setFixedHeight(60)
 
         def fila(etiqueta, widget):
             h = QHBoxLayout()
@@ -63,8 +77,17 @@ class DialogoAlumno(QDialog):
             return h
 
         layout.addLayout(fila("Nombre:", self.edit_nombre))
+        layout.addLayout(fila("Apellidos:", self.edit_apellidos))
+        layout.addLayout(fila("DNI:", self.edit_dni))
         layout.addLayout(fila("Curso:", self.edit_curso))
         layout.addLayout(fila("Grupo:", self.edit_grupo))
+        layout.addLayout(fila("Seccion:", self.edit_seccion))
+        layout.addLayout(fila("Telefono:", self.edit_telefono))
+        layout.addLayout(fila("Email:", self.edit_email))
+        layout.addLayout(fila("Tutor:", self.edit_tutor))
+        layout.addLayout(fila("Tel. tutor:", self.edit_tutor_tel))
+        layout.addLayout(fila("Condicion:", self.combo_condicion))
+        layout.addLayout(fila("Observaciones:", self.edit_observaciones))
 
         # --- Imagen ---
         self.lbl_imagen = QLabel()
@@ -189,6 +212,19 @@ class DialogoAlumno(QDialog):
             return
         curso = self.edit_curso.text().strip()
         grupo = self.edit_grupo.text().strip()
+        apellidos = self.edit_apellidos.text().strip()
+        dni = self.edit_dni.text().strip()
+        seccion = self.edit_seccion.text().strip()
+        telefono = self.edit_telefono.text().strip()
+        email = self.edit_email.text().strip()
+        tutor = self.edit_tutor.text().strip()
+        tutor_tel = self.edit_tutor_tel.text().strip()
+        condicion = self.combo_condicion.currentText().strip()
+        observaciones = self.edit_observaciones.toPlainText().strip()
+        extra = dict(apellidos=apellidos, dni=dni, seccion=seccion,
+                    telefono=telefono, email=email, tutor_nombre=tutor,
+                    tutor_telefono=tutor_tel, condicion=condicion,
+                    observaciones=observaciones)
 
         if self._nuevo:
             if self._imagen_nueva is None:
@@ -196,11 +232,11 @@ class DialogoAlumno(QDialog):
                                     "Captura una foto con la cámara o elige un archivo.")
                 return
             fn = lambda: gestor.agregar(nombre, curso=curso, grupo=grupo,
-                                        imagen=self._imagen_nueva)
+                                        imagen=self._imagen_nueva, **extra)
         else:
             fn = lambda: gestor.editar(self._alumno["alumno_id"], nombre=nombre,
                                        curso=curso, grupo=grupo,
-                                       imagen=self._imagen_nueva)
+                                       imagen=self._imagen_nueva, **extra)
 
         self._set_procesando(True, "Guardando y procesando imagen (puede tardar unos segundos)…")
         self._trabajo = Trabajo(fn, self)
