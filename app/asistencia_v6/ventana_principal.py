@@ -38,6 +38,7 @@ import config as config_app
 import gestor_alumnos as gestor
 import db as db_centinela
 import estado_lcd
+from enlace_wifi import EnlaceWifi
 
 
 class FilaProgreso(QFrame):
@@ -174,6 +175,7 @@ class VentanaPrincipal(QMainWindow):
         self._ultimo_registro = {}  # alumno_id -> timestamp
         self._intervalo_registro = float(self.cfg["asistencia"]["intervalo_antiduplicado"])
         self._camaras_pausadas = []  # cam_ids detenidos temporalmente por una captura
+        self._enlace_wifi = None
 
         # Trabajos en segundo plano
         self._trabajo_recarga = None
@@ -530,6 +532,10 @@ class VentanaPrincipal(QMainWindow):
         self._ultimo_registro = {}
         for cam in activas:
             self._iniciar_hilo(cam)
+        host_lcd = str(self.cfg.get("host_lcd", "")).strip()
+        if host_lcd and self._enlace_wifi is None:
+            self._enlace_wifi = EnlaceWifi(host_lcd)
+            self._enlace_wifi.start()
         self.btn_iniciar.setEnabled(False)
         self.btn_detener.setEnabled(True)
         self.lbl_estado.setText(f"Cámaras: iniciando ({len(self.hilos)})…")
@@ -574,6 +580,10 @@ class VentanaPrincipal(QMainWindow):
         self.hilos.clear()
         self._limpiar_filas()
         self._tras_detener()
+
+        if self._enlace_wifi is not None:
+            self._enlace_wifi.detener()
+            self._enlace_wifi = None
 
     def _tras_detener(self):
         estado_lcd.actualizar_esperando()

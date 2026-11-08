@@ -26,6 +26,7 @@ CAMARA_DEFAULT = {
 }
 
 DEFAULTS = {
+    "host_lcd": "",
     "camaras": [dict(CAMARA_DEFAULT)],
     "asistencia": {
         "umbral_similitud": 0.70,
