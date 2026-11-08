@@ -131,9 +131,15 @@ class FilaProgreso(QFrame):
             import db as db_centinela
             alum = gestor.obtener(alumno_id)
             if alum:
+                nombre = str(alum.get("nombre", "") or "").strip()
+                apellidos = str(alum.get("apellidos", "") or "").strip()
+                completo = " ".join(x for x in (nombre, apellidos) if x)
+                if completo:
+                    self.lbl_nombre.setText(completo)
                 curso = str(alum.get("curso", "")).strip()
                 grupo = str(alum.get("grupo", "")).strip()
-                self.lbl_curso.setText(" \u00b7 ".join(x for x in (curso, grupo) if x))
+                seccion = str(alum.get("seccion", "")).strip()
+                self.lbl_curso.setText(" \u00b7 ".join(x for x in (curso, grupo, seccion) if x))
             # asistencia del dia
             try:
                 hoy = db_centinela.obtener_estado_hoy()
@@ -203,7 +209,11 @@ class TarjetaAlumno(QFrame):
             lbl_foto.setText("?")
         layout.addWidget(lbl_foto, 0, Qt.AlignmentFlag.AlignCenter)
 
-        lbl_nombre = QLabel(str(alumno.get("nombre", "")))
+        nombre_completo = " ".join(x for x in (
+            str(alumno.get("nombre", "") or "").strip(),
+            str(alumno.get("apellidos", "") or "").strip(),
+        ) if x)
+        lbl_nombre = QLabel(nombre_completo or str(alumno.get("nombre", "")))
         lbl_nombre.setStyleSheet(
             "color: #ededed; font-weight: bold; background: transparent; "
             "border: none; font-size: 12px;")
