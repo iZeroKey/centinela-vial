@@ -55,54 +55,55 @@ class FilaProgreso(QFrame):
         self.setStyleSheet(
             "FilaProgreso { background: #1a1a1a; border: 1px solid #333333; border-radius: 10px; }")
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(12, 10, 12, 10)
-        layout.setSpacing(14)
+        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setSpacing(10)
 
         # Foto de referencia
         self.lbl_foto = QLabel()
-        self.lbl_foto.setFixedSize(64, 64)
+        self.lbl_foto.setFixedSize(48, 48)
         self.lbl_foto.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lbl_foto.setStyleSheet(
-            "background: #0d0d0d; border: 1px solid #333333; border-radius: 8px; color: #6b6b6b;")
-        self._cargar_foto(alumno_id)
+            "background: #0d0d0d; border: 1px solid #333333; border-radius: 6px; color: #6b6b6b; font-size: 10px;")
+        self._cargar_foto(alumno_id, 48)
         layout.addWidget(self.lbl_foto)
 
-        # Columna de datos
+        # Columna de datos (compacta)
         col = QVBoxLayout()
-        col.setSpacing(4)
+        col.setSpacing(2)
         self.lbl_nombre = QLabel(nombre)
         self.lbl_nombre.setStyleSheet(
-            "color: #ededed; font-weight: bold; background: transparent; border: none; font-size: 14px;")
+            "color: #ededed; font-weight: bold; background: transparent; border: none; font-size: 13px;")
         col.addWidget(self.lbl_nombre)
 
         self.lbl_curso = QLabel("")
         self.lbl_curso.setStyleSheet(
-            "color: #9a9a9a; background: transparent; border: none; font-size: 12px;")
+            "color: #9a9a9a; background: transparent; border: none; font-size: 11px;")
         col.addWidget(self.lbl_curso)
 
         fila_barra = QHBoxLayout()
+        fila_barra.setSpacing(6)
         self.barra = QProgressBar()
         self.barra.setMaximum(100)
         self.barra.setTextVisible(False)
-        self.barra.setFixedHeight(12)
+        self.barra.setFixedHeight(8)
         fila_barra.addWidget(self.barra, 1)
         self.lbl_estado = QLabel("Verificando...")
         self.lbl_estado.setStyleSheet(
-            "color: #ededed; background: transparent; border: none; font-size: 12px;")
-        self.lbl_estado.setMinimumWidth(130)
+            "color: #ededed; background: transparent; border: none; font-size: 11px;")
+        self.lbl_estado.setMinimumWidth(110)
         fila_barra.addWidget(self.lbl_estado)
         col.addLayout(fila_barra)
 
         self.lbl_asistencia = QLabel("")
         self.lbl_asistencia.setStyleSheet(
-            "color: #5fd08b; background: transparent; border: none; font-size: 12px;")
+            "color: #5fd08b; background: transparent; border: none; font-size: 11px;")
         col.addWidget(self.lbl_asistencia)
 
         layout.addLayout(col, 1)
 
         self._cargar_datos(alumno_id)
 
-    def _cargar_foto(self, alumno_id):
+    def _cargar_foto(self, alumno_id, size=48):
         if not alumno_id:
             self.lbl_foto.setText("?")
             return
@@ -112,7 +113,7 @@ class FilaProgreso(QFrame):
                 (gestor.obtener(alumno_id) or {}).get("foto_referencia"))
             if ruta and os.path.isfile(ruta):
                 pix = QPixmap(ruta).scaled(
-                    64, 64, Qt.AspectRatioMode.KeepAspectRatio,
+                    size, size, Qt.AspectRatioMode.KeepAspectRatio,
                     Qt.TransformationMode.SmoothTransformation)
                 self.lbl_foto.setPixmap(pix)
                 return
