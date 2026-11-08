@@ -18,12 +18,13 @@ import os, sys, time
 import cv2
 
 from PyQt6.QtCore import Qt, QTimer, QDate, pyqtSignal
-from PyQt6.QtGui import QImage, QPixmap, QFont, QColor
+from PyQt6.QtGui import QImage, QPixmap, QFont, QColor, QShortcut, QKeySequence
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QTableWidget, QTableWidgetItem, QSplitter,
     QFrame, QGroupBox, QMessageBox, QHeaderView, QTabWidget,
     QDateEdit, QProgressBar, QScrollArea, QGridLayout, QCheckBox,
+    QGraphicsOpacityEffect,
 )
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -34,6 +35,7 @@ from ui_util import ndarray_a_pixmap
 from dialogo_alumno import DialogoAlumno
 from panel_configuracion import PanelConfiguracion
 from simulador_lcd import SimuladorLCD
+from toast import Toast
 import config as config_app
 import gestor_alumnos as gestor
 import db as db_centinela
@@ -176,6 +178,7 @@ class VentanaPrincipal(QMainWindow):
         self._intervalo_registro = float(self.cfg["asistencia"]["intervalo_antiduplicado"])
         self._camaras_pausadas = []  # cam_ids detenidos temporalmente por una captura
         self._enlace_wifi = None
+        self._toasts = []
 
         # Trabajos en segundo plano
         self._trabajo_recarga = None
@@ -191,6 +194,45 @@ class VentanaPrincipal(QMainWindow):
         self._temporizador_tracks.start()
         self._actualizar_galeria()
         self._actualizar_historial()
+        self._configurar_atajos()
+
+    # ---------------- Toasts y atajos ----------------
+    def mostrar_toast(self, mensaje, tipo="info", duracion_ms=3000):
+        toast = Toast(self, mensaje, tipo, duracion_ms)
+        self._toasts.append(toast)
+        toast.destroyed.connect(lambda *_: self._quitar_toast(toast))
+        self._reposicionar_toasts()
+
+    def _quitar_toast(self, toast):
+        if toast in self._toasts:
+            self._toasts.remove(toast)
+        self._reposicionar_toasts()
+
+    def _reposicionar_toasts(self):
+        margen = 16
+        y = margen
+        for t in self._toasts:
+            x = self.width() - t.width() - margen
+            t.move(x, y)
+            y += t.height() + 8
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._reposicionar_toasts()
+
+    def _configurar_atajos(self):
+        QShortcut(QKeySequence("F5"), self, activated=self._atajo_iniciar)
+        QShortcut(QKeySequence("F6"), self, activated=self._atajo_detener)
+        QShortcut(QKeySequence("Ctrl+N"), self, activated=self._agregar_alumno)
+        QShortcut(QKeySequence("Ctrl+Q"), self, activated=self.close)
+
+    def _atajo_iniciar(self):
+        if self.btn_iniciar.isEnabled():
+            self._iniciar_camaras()
+
+    def _atajo_detener(self):
+        if self.btn_detener.isEnabled():
+            self._detener_camaras()
 
     # ---------------- UI base ----------------
     def _construir_ui(self):
@@ -524,9 +566,9 @@ class VentanaPrincipal(QMainWindow):
             return
         activas = [c for c in self.cfg.get("camaras", []) if c.get("activa")]
         if not activas:
-            QMessageBox.information(
-                self, "Sin cámaras",
-                "No hay cámaras activas. Configúrelas en la pestaña Configuración.")
+            self.mostrar_toast(
+                "No hay cámaras activas. Configúrelas en la pestaña Configuración.",
+                "warning")
             return
         self._limpiar_filas()
         self._ultimo_registro = {}
@@ -556,9 +598,9 @@ class VentanaPrincipal(QMainWindow):
                 confirm_seg=float(asist.get("segundos_confirmacion", 3.0)),
             )
         except Exception as e:
-            QMessageBox.warning(
-                self, "Cámara",
-                f"No se pudo preparar '{cam.get('nombre') or cam_id}': {e}")
+            self.mostrar_toast(
+                f"No se pudo preparar '{cam.get('nombre') or cam_id}': {e}",
+                "error")
             return
         cam_id = cam["id"]
         hilo.frame_listo.connect(
@@ -658,8 +700,7 @@ class VentanaPrincipal(QMainWindow):
         hilo = self.hilos.pop(cam_id, None)
         if hilo is not None:
             hilo.detener()
-        QMessageBox.critical(self, "Error de cámara",
-                             f"{self._nombre_cam(cam_id)}: {mensaje}")
+        self.mostrar_toast(f"{self._nombre_cam(cam_id)}: {mensaje}", "error")
         if not self.hilos:
             self._tras_detener()
 
