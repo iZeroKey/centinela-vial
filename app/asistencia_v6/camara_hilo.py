@@ -444,7 +444,14 @@ class CamaraHilo(QThread):
             if track_match is not None:
                 # Mismo alumno, misma zona: acumular tiempo
                 tr = self._tracks[track_match]
-                tr.t_acumulado += dt
+                # Acumular tiempo REAL (no dt del loop, que es ~ms).
+                # Tope por frame para no saltar por pérdidas momentáneas.
+                delta = time.time() - tr.t_ultimo
+                if delta > 0.5:
+                    delta = 0.5
+                if delta < 0:
+                    delta = 0.0
+                tr.t_acumulado += delta
                 tr.t_ultimo = time.time()
                 tr.caja = caja
                 tracks_vistos.add(track_match)
