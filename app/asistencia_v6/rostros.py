@@ -25,6 +25,17 @@ Requisitos:
 
 import os, sys, threading, cv2, numpy as np, torch
 
+# --- Detector alternativo para pruebas ---
+# USAR_MEDIAPIPE = True  -> usa MediaPipe Face Detection (mas rapido, mas robusto)
+# USAR_MEDIAPIPE = False -> usa detector_seg2 propio (modelo original, comentado abajo)
+USAR_MEDIAPIPE = True
+try:
+    import mediapipe as _mp
+    _MEDIAPIPE_OK = True
+except Exception:
+    _MEDIAPIPE_OK = False
+    USAR_MEDIAPIPE = False
+
 # ---- rutas del proyecto (relativas a este archivo) ----
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 _DETECTOR_PTH = os.path.join(_ROOT, "models", "ocular_v2", "detector_seg2", "best.pth")
@@ -95,28 +106,73 @@ def preprocess_det(frame_bgr):
     return t, w0, h0
 
 
+
+_mp_face_detector = None
+
+def _cargar_mediapipe_detector():
+    """Carga (lazy) el detector de caras de MediaPipe."""
+    global _mp_face_detector
+    if _mp_face_detector is not None:
+        return _mp_face_detector
+    if not _MEDIAPIPE_OK:
+        return None
+    _mp_face_detector = _mp.solutions.face_detection.FaceDetection(
+        model_selection=0, min_detection_confidence=0.5)
+    return _mp_face_detector
+
+def detectar_caras_mediapipe(frame_bgr, thr=0.5):
+    """Detecta caras con MediaPipe. Devuelve [(x1,y1,x2,y2,score), ...]."""
+    fd = _cargar_mediapipe_detector()
+    if fd is None:
+        return []
+    rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+    res = fd.process(rgb)
+    if not res.detections:
+        return []
+    h, w = frame_bgr.shape[:2]
+    caras = []
+    for d in res.detections:
+        bb = d.location_data.relative_bounding_box
+        x1 = max(0, int(bb.xmin * w))
+        y1 = max(0, int(bb.ymin * h))
+        x2 = min(w, int((bb.xmin + bb.width) * w))
+        y2 = min(h, int((bb.ymin + bb.height) * h))
+        score = float(d.score[0]) if d.score else 0.0
+        if score < thr:
+            continue
+        if x2 - x1 < 20 or y2 - y1 < 20:
+            continue
+        caras.append((x1, y1, x2, y2, score))
+    return caras
+
 def detectar_caras(frame_bgr, thr=0.5):
     """
-    Detecta TODAS las caras en el frame con detector_seg2.
+    Detecta TODAS las caras en el frame.
+    - Si USAR_MEDIAPIPE=True: usa MediaPipe Face Detection (prueba).
+    - Si USAR_MEDIAPIPE=False: usa detector_seg2 propio (modelo original).
     Devuelve lista de tuplas: [(x1, y1, x2, y2, score), ...]
     en coordenadas de la imagen original.
     """
-    detw, modelo, dev = cargar_detector()
-    t, w0, h0 = preprocess_det(frame_bgr)
-    with torch.no_grad():
-        boxes, scores = detw.infer(modelo, t.to(dev), thr=thr)
-    if boxes.numel() == 0:
-        return []
+    if USAR_MEDIAPIPE and _MEDIAPIPE_OK:
+        return detectar_caras_mediapipe(frame_bgr, thr=thr)
 
-    sx, sy = w0 / IN_W, h0 / IN_H
-    caras = []
-    for b, s in zip(boxes.tolist(), scores.tolist()):
-        x1 = float(b[0] * sx)
-        y1 = float(b[1] * sy)
-        x2 = float(b[2] * sx)
-        y2 = float(b[3] * sy)
-        caras.append((x1, y1, x2, y2, float(s)))
-    return caras
+    # --- Modelo original (detector_seg2) --- COMENTADO PARA PRUEBA ---
+    # detw, modelo, dev = cargar_detector()
+    # t, w0, h0 = preprocess_det(frame_bgr)
+    # with torch.no_grad():
+    #     boxes, scores = detw.infer(modelo, t.to(dev), thr=thr)
+    # if boxes.numel() == 0:
+    #     return []
+    # sx, sy = w0 / IN_W, h0 / IN_H
+    # caras = []
+    # for b, s in zip(boxes.tolist(), scores.tolist()):
+    #     x1 = float(b[0] * sx)
+    #     y1 = float(b[1] * sy)
+    #     x2 = float(b[2] * sx)
+    #     y2 = float(b[3] * sy)
+    #     caras.append((x1, y1, x2, y2, float(s)))
+    # return caras
+    return []
 
 
 # ---- FaceNet (embeddings) ----
