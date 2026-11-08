@@ -33,6 +33,7 @@ DEFAULTS = {
         "segundos_confirmacion": 3.0,
         "intervalo_antiduplicado": 30,
         "umbral_lcd_nombre": 0.30,
+        "duracion_resultado_lcd": 3.0,
     },
 }
 

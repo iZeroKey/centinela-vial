@@ -7,6 +7,8 @@ para que otra integración pueda recuperar los datos fácilmente.
 
 from copy import deepcopy
 from datetime import datetime
+import threading
+import time
 from threading import RLock
 
 
@@ -16,6 +18,24 @@ MAX_LOG_LCD = 100
 # Umbral (0..1) de progreso a partir del cual se muestra el nombre en el LCD
 # al detectar un rostro. Evita falsos positivos (nombres con 1% de avance).
 UMBRAL_NOMBRE_LCD = 0.30
+
+# Duración (s) que se mantiene visible un resultado (confirmado/incompleto/
+# desconocido) en el LCD antes de permitir que un nuevo estado lo sobrescriba.
+DURACION_RESULTADO_LCD = 3.0
+
+_resultado_hasta = 0.0
+_pendiente_args = None
+_timer_resultado = None
+
+
+def configurar_duracion_resultado_lcd(valor):
+    """Ajusta la duración global que se mantiene visible un resultado en el LCD."""
+    global DURACION_RESULTADO_LCD
+    try:
+        v = float(valor)
+    except (TypeError, ValueError):
+        return
+    DURACION_RESULTADO_LCD = max(0.5, min(30.0, v))
 
 
 def configurar_umbral_nombre_lcd(valor):
@@ -80,9 +100,47 @@ def _filas_para(estado, nombre, apellidos, progreso, motivo):
     return _linea(fila_1), _linea(fila_2)
 
 
-def _publicar(estado, nombre="", apellidos="", progreso=0.0, motivo=""):
+def _publicar(estado, nombre="", apellidos="", progreso=0.0, motivo="", _forzar=False):
+    global _resultado_hasta, _pendiente_args, _timer_resultado
+
     progreso = _progreso_0_100(progreso)
-    fila_1, fila_2 = _filas_para(estado, nombre, apellidos, progreso, motivo)
+    ahora = time.monotonic()
+    es_resultado = estado in ("confirmado", "incompleto", "desconocido")
+
+    with _lock:
+        # Si hay un resultado visible y llega un estado no-resultado, encolarlo
+        # para no sobrescribir el OK instantáneamente.
+        if not _forzar and not es_resultado and ahora < _resultado_hasta:
+            _pendiente_args = (estado, nombre, apellidos, progreso, motivo)
+            if _timer_resultado is None:
+                delay = max(0.0, _resultado_hasta - ahora)
+
+                def _aplicar():
+                    global _timer_resultado, _pendiente_args, _resultado_hasta
+                    with _lock:
+                        _timer_resultado = None
+                        if _pendiente_args is not None:
+                            pa = _pendiente_args
+                            _pendiente_args = None
+                            _resultado_hasta = 0.0
+                        else:
+                            pa = None
+                    if pa is not None:
+                        _publicar(*pa, _forzar=True)
+
+                _timer_resultado = threading.Timer(delay, _aplicar)
+                _timer_resultado.daemon = True
+                _timer_resultado.start()
+            return
+
+        if es_resultado:
+            _resultado_hasta = ahora + DURACION_RESULTADO_LCD
+            _pendiente_args = None
+            if _timer_resultado is not None:
+                _timer_resultado.cancel()
+                _timer_resultado = None
+
+        fila_1, fila_2 = _filas_para(estado, nombre, apellidos, progreso, motivo)
     registro = {
         "estado": estado,
         "nombre": str(nombre or "").strip(),

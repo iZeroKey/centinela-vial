@@ -168,6 +168,8 @@ class VentanaPrincipal(QMainWindow):
         self.cfg = config_app.cargar()
         estado_lcd.configurar_umbral_nombre_lcd(
             self.cfg.get("asistencia", {}).get("umbral_lcd_nombre", 0.30))
+        estado_lcd.configurar_duracion_resultado_lcd(
+            self.cfg.get("asistencia", {}).get("duracion_resultado_lcd", 3.0))
 
         # Estado de vigilancia
         self.referencias = []
@@ -736,6 +738,8 @@ class VentanaPrincipal(QMainWindow):
         self._ultimo_progreso_track[(cam_id, track_id)] = time.monotonic()
         estado_lcd.configurar_umbral_nombre_lcd(
             self.cfg.get("asistencia", {}).get("umbral_lcd_nombre", 0.30))
+        estado_lcd.configurar_duracion_resultado_lcd(
+            self.cfg.get("asistencia", {}).get("duracion_resultado_lcd", 3.0))
         estado_lcd.actualizar_procesamiento(nombre=nombre, progreso=progreso)
         self._actualizar_simulador_lcd()
         self.lbl_sin_rostros.hide()

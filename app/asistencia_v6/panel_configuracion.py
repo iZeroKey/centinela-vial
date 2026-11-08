@@ -303,5 +303,7 @@ class PanelConfiguracion(QWidget):
             "umbral_similitud": float(self.spin_umbral.value()),
             "segundos_confirmacion": float(self.spin_confirm.value()),
             "intervalo_antiduplicado": int(self.spin_antidup.value()),
+            "umbral_lcd_nombre": float(self.cfg.get("asistencia", {}).get("umbral_lcd_nombre", 0.30)),
+            "duracion_resultado_lcd": float(self.cfg.get("asistencia", {}).get("duracion_resultado_lcd", 3.0)),
         }
         self._guardar_y("parametros_cambiados")
