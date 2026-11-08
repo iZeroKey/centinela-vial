@@ -34,6 +34,7 @@ DEFAULTS = {
         "intervalo_antiduplicado": 30,
         "umbral_lcd_nombre": 0.30,
         "duracion_resultado_lcd": 3.0,
+        "modo_escaneo": "uno",   # "uno" = solo el rostro mas grande | "varios" = todos
     },
 }
 

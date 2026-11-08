@@ -65,7 +65,7 @@ class CamaraHilo(QThread):
 
     def __init__(self, fuente, referencias, umbral_global=0.70,
                  intervalo_segundos=0.1, confirm_seg=CONFIRM_SEG,
-                 reconocer=True):
+                 reconocer=True, modo_escaneo="uno"):
         super().__init__()
         self.fuente = fuente
         self._lock_ref = threading.Lock()
@@ -74,6 +74,7 @@ class CamaraHilo(QThread):
         self.intervalo_segundos = intervalo_segundos
         self.confirm_seg = confirm_seg
         self.reconocer = reconocer
+        self.modo_escaneo = modo_escaneo  # "uno" | "varios"
         self._corriendo = False
         self._cap = None
         self._stream = None          # respuesta HTTP para streams MJPEG
@@ -369,6 +370,10 @@ class CamaraHilo(QThread):
 
     def _procesar(self, frame, dt):
         resultados = pipeline_embeddings(frame, thr=0.5)
+        # Modo "uno": solo procesar la cara mas grande (mayor area).
+        if self.modo_escaneo == "uno" and len(resultados) > 1:
+            resultados = [max(resultados, key=lambda r: (
+                (r["caja"][2] - r["caja"][0]) * (r["caja"][3] - r["caja"][1])))]
         anotado = frame.copy()
 
         refs = self._refs_snapshot()

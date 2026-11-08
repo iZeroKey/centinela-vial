@@ -293,6 +293,13 @@ class PanelConfiguracion(QWidget):
         v.addLayout(fila("Segundos de confirmación", self.spin_confirm, "tiempo seguido para confirmar"))
         v.addLayout(fila("Intervalo anti-duplicado", self.spin_antidup, "mínimo entre marcas del mismo alumno"))
 
+        self.combo_modo = QComboBox()
+        self.combo_modo.addItems(["Uno (solo el rostro más grande)", "Varios (todos los rostros)"])
+        modo_actual = asist.get("modo_escaneo", "uno")
+        self.combo_modo.setCurrentIndex(0 if modo_actual == "uno" else 1)
+        self.combo_modo.setFixedWidth(260)
+        v.addLayout(fila("Modo de escaneo", self.combo_modo, "uno = prioriza el rostro mayor"))
+
         btn_guardar = QPushButton("Guardar parámetros")
         btn_guardar.clicked.connect(self._guardar_parametros)
         v.addWidget(btn_guardar, 0, Qt.AlignmentFlag.AlignLeft)
@@ -305,5 +312,6 @@ class PanelConfiguracion(QWidget):
             "intervalo_antiduplicado": int(self.spin_antidup.value()),
             "umbral_lcd_nombre": float(self.cfg.get("asistencia", {}).get("umbral_lcd_nombre", 0.30)),
             "duracion_resultado_lcd": float(self.cfg.get("asistencia", {}).get("duracion_resultado_lcd", 3.0)),
+            "modo_escaneo": "uno" if self.combo_modo.currentIndex() == 0 else "varios",
         }
         self._guardar_y("parametros_cambiados")

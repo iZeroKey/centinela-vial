@@ -666,6 +666,7 @@ class VentanaPrincipal(QMainWindow):
                 umbral_global=float(asist.get("umbral_similitud", 0.70)),
                 intervalo_segundos=float(cam.get("intervalo_proceso", 0.1)),
                 confirm_seg=float(asist.get("segundos_confirmacion", 3.0)),
+                modo_escaneo=str(asist.get("modo_escaneo", "uno")),
             )
         except Exception as e:
             self.mostrar_toast(
