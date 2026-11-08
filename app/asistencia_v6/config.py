@@ -32,6 +32,7 @@ DEFAULTS = {
         "umbral_similitud": 0.70,
         "segundos_confirmacion": 3.0,
         "intervalo_antiduplicado": 30,
+        "umbral_lcd_nombre": 0.30,
     },
 }
 

@@ -13,6 +13,20 @@ from threading import RLock
 LCD_ANCHO = 16
 MAX_LOG_LCD = 100
 
+# Umbral (0..1) de progreso a partir del cual se muestra el nombre en el LCD
+# al detectar un rostro. Evita falsos positivos (nombres con 1% de avance).
+UMBRAL_NOMBRE_LCD = 0.30
+
+
+def configurar_umbral_nombre_lcd(valor):
+    """Ajusta el umbral global de progreso para mostrar el nombre en el LCD."""
+    global UMBRAL_NOMBRE_LCD
+    try:
+        v = float(valor)
+    except (TypeError, ValueError):
+        return
+    UMBRAL_NOMBRE_LCD = max(0.0, min(1.0, v))
+
 _lock = RLock()
 _log = []
 _estado = {
@@ -46,7 +60,10 @@ def _progreso_0_100(progreso):
 
 def _filas_para(estado, nombre, apellidos, progreso, motivo):
     if estado == "procesando":
-        fila_1 = nombre or "PROCESANDO"
+        if progreso < UMBRAL_NOMBRE_LCD * 100.0:
+            fila_1 = "PROCESANDO"
+        else:
+            fila_1 = nombre or "PROCESANDO"
         fila_2 = f"PROCESANDO {progreso:3.0f}%"
     elif estado == "confirmado":
         fila_1 = nombre or "IDENTIFICADO"

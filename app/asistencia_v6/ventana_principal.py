@@ -18,7 +18,8 @@ import os, sys, time
 import cv2
 
 from PyQt6.QtCore import Qt, QTimer, QDate, pyqtSignal
-from PyQt6.QtGui import QImage, QPixmap, QFont, QColor, QShortcut, QKeySequence
+from PyQt6.QtGui import (QImage, QPixmap, QFont, QColor, QShortcut, QKeySequence,
+                         QPainter, QPen, QBrush)
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QTableWidget, QTableWidgetItem, QSplitter,
@@ -165,6 +166,8 @@ class VentanaPrincipal(QMainWindow):
 
         # Configuración persistente
         self.cfg = config_app.cargar()
+        estado_lcd.configurar_umbral_nombre_lcd(
+            self.cfg.get("asistencia", {}).get("umbral_lcd_nombre", 0.30))
 
         # Estado de vigilancia
         self.referencias = []
@@ -683,7 +686,32 @@ class VentanaPrincipal(QMainWindow):
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         h, w, ch = rgb.shape
         qimg = QImage(rgb.data, w, h, ch * w, QImage.Format.Format_RGB888)
-        lbl.setPixmap(qimg_scaled(qimg, lbl))
+        pix = qimg_scaled(qimg, lbl)
+
+        # Overlay moderno (UI-side, no toca la captura): borde + chip "EN VIVO"
+        painter = QPainter(pix)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pen = QPen(QColor("#2a2a2a"))
+        pen.setWidth(2)
+        painter.setPen(pen)
+        painter.drawRoundedRect(pix.rect().adjusted(1, 1, -1, -1), 10, 10)
+
+        chip_text = "EN VIVO"
+        font = QFont("Segoe UI", 9, QFont.Weight.Bold)
+        painter.setFont(font)
+        fm = painter.fontMetrics()
+        tw = fm.horizontalAdvance(chip_text) + 16
+        th = fm.height() + 6
+        rx = pix.width() - tw - 12
+        ry = 12
+        painter.setBrush(QBrush(QColor("#163024")))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawRoundedRect(rx, ry, tw, th, 6, 6)
+        painter.setPen(QColor("#5fd08b"))
+        painter.drawText(rx + 8, ry + fm.ascent() + 3, chip_text)
+        painter.end()
+
+        lbl.setPixmap(pix)
 
     def _on_estado_cam(self, cam_id, activa):
         lbl = self.labels_estado_cam.get(cam_id)
@@ -706,6 +734,8 @@ class VentanaPrincipal(QMainWindow):
 
     def _on_progreso(self, cam_id, track_id, progreso, nombre, alumno_id, _caja):
         self._ultimo_progreso_track[(cam_id, track_id)] = time.monotonic()
+        estado_lcd.configurar_umbral_nombre_lcd(
+            self.cfg.get("asistencia", {}).get("umbral_lcd_nombre", 0.30))
         estado_lcd.actualizar_procesamiento(nombre=nombre, progreso=progreso)
         self._actualizar_simulador_lcd()
         self.lbl_sin_rostros.hide()
