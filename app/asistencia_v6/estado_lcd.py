@@ -58,7 +58,7 @@ def _filas_para(estado, nombre, apellidos, progreso, motivo):
         fila_1 = "NO IDENTIFICADO"
         fila_2 = motivo or "INTENTE DE NUEVO"
     else:
-        fila_1 = "CENTINELA VIAL"
+        fila_1 = "CENTINELA CTRL"
         fila_2 = motivo or "ESPERANDO..."
     return _linea(fila_1), _linea(fila_2)
 

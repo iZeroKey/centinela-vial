@@ -206,7 +206,7 @@ que un hilo de integración no modifica accidentalmente el estado compartido.
 ### Estados mostrados
 
 ```text
-esperando:    CENTINELA VIAL / ESPERANDO...
+esperando:    CENTINELA CTRL / ESPERANDO...
 procesando:   nombre       / PROCESANDO 75%
 confirmado:   nombre       / apellidos
 incompleto:   nombre       / INCOMPLETO

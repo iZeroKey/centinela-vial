@@ -1,5 +1,5 @@
 /*
- * Centinela Vial - Receptor LCD + LEDs por WiFi (ESP32 Dev Module)
+ * Centinela Control - Receptor LCD + LEDs por WiFi (ESP32 Dev Module)
  *
  * El ESP32 se conecta a la misma red WiFi que la PC y la ESP32-CAM y recibe
  * el estado de la app por HTTP:
@@ -101,7 +101,7 @@ void mostrarSinConexion() {
   estadoActual = SIN_CONEXION;
   txtEstadoActual = "sin_conexion";
   aplicarLeds(SIN_CONEXION);
-  escribirLCD("CENTINELA VIAL", "SIN CONEXION PC");
+  escribirLCD("CENTINELA CTRL", "SIN CONEXION PC");
 }
 
 // ---------------- Lógica de estado (igual que la versión serial) ----------------
@@ -149,7 +149,7 @@ void rutaRaiz() {
     "<meta http-equiv='refresh' content='1'>"
     "<title>Centinela LCD</title></head>"
     "<body style='font-family:monospace'>"
-    "<h3>Centinela Vial - receptor LCD</h3>"
+    "<h3>Centinela Control - receptor LCD</h3>"
     "<pre style='background:#9cb83a;padding:10px;display:inline-block'>" +
     fila1Actual + "\n" + fila2Actual +
     "</pre><p>Estado: " + txtEstadoActual + "</p>"

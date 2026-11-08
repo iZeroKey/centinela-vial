@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "proyecto": "Centinela Vial - Asistencia y vigilancia de aula",
+  "proyecto": "Centinela Control - Asistencia y vigilancia de aula",
   "descripcion": "Base de datos ligera de alumnos para reconocimiento facial. Un registro por alumno. La foto de referencia es una foto real tipo DNI del alumno (NO generada por IA). El embedding se llena al procesar la foto de referencia con el modelo de embeddings preentrenado.",
   "campos": {
     "alumno_id": "Identificador único del alumno (ej. E001)",
