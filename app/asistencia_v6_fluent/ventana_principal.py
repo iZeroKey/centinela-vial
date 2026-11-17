@@ -21,7 +21,7 @@ import cv2
 import numpy as np
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QRect, QRectF, QEvent
-from PyQt6.QtGui import (QImage, QPixmap, QFont, QColor, QShortcut, QKeySequence,
+from PyQt6.QtGui import (QImage, QPixmap, QFont, QColor, QIcon, QShortcut, QKeySequence,
                          QPainter, QPen, QBrush, QPainterPath)
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QBoxLayout,
@@ -44,6 +44,7 @@ from ui_util import ndarray_a_pixmap
 from dialogo_alumno import DialogoAlumno
 from panel_configuracion import PanelConfiguracion
 from panel_clases import PanelClases
+from panel_dispositivos import PanelDispositivos
 from simulador_lcd import SimuladorLCD
 from widgets_historial import (
     TarjetaGrupoCurso, TablaSeccion, EstadoVacioHistorial, hhmm,
@@ -458,10 +459,15 @@ class VentanaPrincipal(FluentWindow):
         self.panel_clases.setObjectName("clasesInterface")
         self.panel_config.setObjectName("configInterface")
 
+        self.tab_dispositivos = PanelDispositivos(
+            obtener_servidor=lambda: self._servidor_web)
+        self.tab_dispositivos.setObjectName("dispositivosInterface")
+
         self.addSubInterface(self.tab_vigilancia, FIcon.VIDEO, "Vigilancia")
         self.addSubInterface(self.tab_historial, FIcon.HISTORY, "Historial")
         self.addSubInterface(self.panel_clases, FIcon.CALENDAR, "Clases")
         self.addSubInterface(self.tab_alumnos, FIcon.PEOPLE, "Alumnos")
+        self.addSubInterface(self.tab_dispositivos, FIcon.PHONE, "Dispositivos")
         self.addSubInterface(self.panel_config, FIcon.SETTING, "Configuración")
 
         self.stackedWidget.currentChanged.connect(self._on_page_changed)
@@ -1809,9 +1815,17 @@ def _pixmap_redondeado(pix, radio):
     return out
 
 
+def _app_icono():
+    """Icono de la ventana (del repo raiz: favicon.svg)."""
+    ruta = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "..", "..", "favicon.svg")
+    return QIcon(ruta)
+
+
 def main():
     app = QApplication(sys.argv)
     app.setFont(QFont("Segoe UI", 10))
+    app.setWindowIcon(_app_icono())
     ventana = VentanaPrincipal()
     ventana.show()
     sys.exit(app.exec())
