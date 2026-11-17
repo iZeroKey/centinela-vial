@@ -165,6 +165,7 @@ class PanelConfiguracion(QWidget):
         layout.addWidget(self._construir_grupo_camaras())
         layout.addWidget(self._construir_grupo_asistencia())
         layout.addWidget(self._construir_grupo_tardanzas())
+        layout.addWidget(self._construir_grupo_web())
         layout.addStretch(1)
 
         scroll = ScrollArea()
@@ -418,6 +419,38 @@ class PanelConfiguracion(QWidget):
         asist = self.cfg.setdefault("asistencia", {})
         asist["aplicar_horarios"] = bool(checked)
         self._guardar_y("parametros_cambiados")
+
+    # ---------------- Red / Servidor web ----------------
+    def _construir_grupo_web(self):
+        """Switch para activar/desactivar el servidor web + estado actual."""
+        grupo = SettingCardGroup("Red / Servidor web")
+
+        self.sw_web = SwitchSettingCard(
+            FIcon.GLOBE, "Servidor web",
+            "expone el visor y el telefono en la red local (https://<ip>:8443)")
+        self.sw_web.setChecked(bool(self.cfg.get("web", {}).get("habilitar", True)))
+        self.sw_web.checkedChanged.connect(self._on_toggle_web)
+        grupo.addSettingCard(self.sw_web)
+
+        # Tarjeta de solo lectura con el estado real (la rellena la ventana)
+        self.tarjeta_estado_web = SettingCard(
+            FIcon.LINK, "Estado del servidor web", "—")
+        grupo.addSettingCard(self.tarjeta_estado_web)
+        return grupo
+
+    def _on_toggle_web(self, checked):
+        self.cfg["web"] = {"habilitar": bool(checked)}
+        self._guardar_y("web_cambiado")
+
+    def actualizar_estado_web(self, activo, url=""):
+        """Rellena la tarjeta Estado con el estado real del servidor."""
+        tarjeta = getattr(self, "tarjeta_estado_web", None)
+        if tarjeta is None:
+            return
+        if activo:
+            tarjeta.setContent(url or "https://centinela.local:8443")
+        else:
+            tarjeta.setContent("detenido — sin acceso por red")
 
 
 

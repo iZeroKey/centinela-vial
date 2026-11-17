@@ -54,7 +54,7 @@ import gestor_alumnos as gestor
 import db as db_centinela
 import estado_lcd
 from enlace_wifi import EnlaceWifi
-from servidor_web import ServidorWeb
+from servidor_web import ServidorWeb, ip_local
 
 # Hueco de video integrado a la tarjeta Fluent (transparente, sin borde).
 ESTILO_VIDEO = "background: transparent; border: none; color: #a5a5a5; font-size: 14px;"
@@ -405,6 +405,11 @@ class VentanaPrincipal(FluentWindow):
         self._actualizar_historial()
         self._configurar_atajos()
         self.installEventFilter(self)
+        # Servidor web: arranca al abrir la app si esta activado en config
+        if bool(self.cfg.get("web", {}).get("habilitar", True)):
+            self._iniciar_servidor_web()
+        else:
+            self._actualizar_estado_web_panel()
 
     _MAPA_TOAST = {
         "exito": InfoBar.success,
@@ -444,6 +449,7 @@ class VentanaPrincipal(FluentWindow):
         self.panel_config = PanelConfiguracion(callbacks={
             "camaras_cambiadas": self._on_camaras_cambiadas,
             "parametros_cambiados": self._on_parametros_cambiados,
+            "web_cambiado": self._on_web_cambiado,
         })
         self.panel_clases = PanelClases(callbacks={
             "horarios_cambiados": self._on_horarios_cambiados,
@@ -477,6 +483,7 @@ class VentanaPrincipal(FluentWindow):
 
     def closeEvent(self, event):
         self._detener_camaras()
+        self._detener_servidor_web()
         event.accept()
 
     def event(self, ev):
@@ -954,7 +961,6 @@ class VentanaPrincipal(FluentWindow):
         if host_lcd and self._enlace_wifi is None:
             self._enlace_wifi = EnlaceWifi(host_lcd)
             self._enlace_wifi.start()
-        self._iniciar_servidor_web()
         self.btn_iniciar.setEnabled(False)
         self.btn_detener.setEnabled(True)
         self.lbl_estado.setText(f"Cámaras: iniciando ({len(self.hilos)})…")
@@ -994,6 +1000,34 @@ class VentanaPrincipal(FluentWindow):
                   + traceback.format_exc(), flush=True)
             self.mostrar_toast(f"Servidor web no disponible: {e}", "warning")
             self._servidor_web = None
+        self._actualizar_estado_web_panel()
+
+    def _detener_servidor_web(self):
+        """Apaga el servidor web (independiente de la vigilancia)."""
+        if self._servidor_web is not None:
+            self._servidor_web.detener()
+            self._servidor_web = None
+        self._actualizar_estado_web_panel()
+
+    def _actualizar_estado_web_panel(self):
+        """Pinta en Configuración el estado real del servidor."""
+        panel = getattr(self, "panel_config", None)
+        if panel is None:
+            return
+        activo = self._servidor_web is not None
+        url = f"https://{ip_local()}:8443" if activo else ""
+        panel.actualizar_estado_web(activo, url)
+
+    def _on_web_cambiado(self, cfg):
+        """Aplicar el interruptor del servidor web al instante."""
+        self.cfg = cfg
+        self.panel_clases.cfg = cfg   # panel_clases parte del mismo estado
+        if bool(cfg.get("web", {}).get("habilitar", True)):
+            self._iniciar_servidor_web()
+            self.mostrar_toast("Servidor web activado", "info")
+        else:
+            self._detener_servidor_web()
+            self.mostrar_toast("Servidor web detenido", "info")
 
     # ---------------- Telefonos como camaras (Fase 1b) ----------------
     def _crear_hilo_telefono(self, tel_id, nombre):
@@ -1120,10 +1154,6 @@ class VentanaPrincipal(FluentWindow):
         if self._enlace_wifi is not None:
             self._enlace_wifi.detener()
             self._enlace_wifi = None
-
-        if self._servidor_web is not None:
-            self._servidor_web.detener()
-            self._servidor_web = None
 
     def _tras_detener(self):
         estado_lcd.actualizar_esperando()
