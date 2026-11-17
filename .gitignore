@@ -1,7 +1,6 @@
 .venv/
 __pycache__/
 *.py[cod]
-*.sqlite
 *.sqlite-shm
 *.sqlite-wal
 *.log
@@ -30,7 +29,6 @@ app/firmware/camara/CentinelaCamWifi_v6c/
 app/firmware/camara/CentinelaCamWifi_v7/
 app/data/asistencia/prueba/
 app/data/asistencia/README.md
-app/data/centinela/
 app/data/datasets/
 
 # Aplicaciones, demos y versiones que no pertenecen al paquete estable
