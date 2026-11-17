@@ -51,6 +51,7 @@ import gestor_alumnos as gestor
 import db as db_centinela
 import estado_lcd
 from enlace_wifi import EnlaceWifi
+from servidor_web import ServidorWeb
 
 # Hueco de video integrado a la tarjeta Fluent (transparente, sin borde).
 ESTILO_VIDEO = "background: transparent; border: none; color: #a5a5a5; font-size: 14px;"
@@ -368,6 +369,7 @@ class VentanaPrincipal(FluentWindow):
         self._trabajo_recarga = None
         self._info_alumnos = {}          # alumno_id -> nombre/inscripciones
         self._avisos_fuera_horario = {}  # alumno_id -> ts del ultimo aviso
+        self._servidor_web = None
 
         db_centinela.init_db()
         gestor.sincronizar_db()
@@ -644,6 +646,9 @@ class VentanaPrincipal(FluentWindow):
         grupo = HeaderCardWidget()
         grupo.setTitle("Historial de clases")
         lg = grupo.viewLayout
+        # viewLayout de HeaderCardWidget es horizontal por defecto: sin esto,
+        # filtros/resumen/matriz quedan LADO A LADO (matriz exprimida a la derecha)
+        lg.setDirection(QBoxLayout.Direction.TopToBottom)
         lg.setSpacing(10)
 
         # fila 1: selectores de curso/sección + detalles + búsqueda + acciones
@@ -913,10 +918,37 @@ class VentanaPrincipal(FluentWindow):
         if host_lcd and self._enlace_wifi is None:
             self._enlace_wifi = EnlaceWifi(host_lcd)
             self._enlace_wifi.start()
+        self._iniciar_servidor_web()
         self.btn_iniciar.setEnabled(False)
         self.btn_detener.setEnabled(True)
         self.lbl_estado.setText(f"Cámaras: iniciando ({len(self.hilos)})…")
         self._estilo_estado(self.lbl_estado, True)
+
+    def _iniciar_servidor_web(self):
+        """Arranca el visor web + mDNS (https://centinela.local:8443)."""
+        if self._servidor_web is not None:
+            return
+
+        def provedor_frame():
+            for hilo in self.hilos.values():
+                frame = hilo.frame_actual()
+                if frame is not None:
+                    return frame
+            return None
+
+        def provedor_estado():
+            return {"nodos": {
+                f"cam_{cid}": {"online": bool(hilo.isRunning()),
+                               "tipo": "camara"}
+                for cid, hilo in self.hilos.items()
+            }}
+
+        try:
+            self._servidor_web = ServidorWeb(provedor_frame, provedor_estado)
+            self._servidor_web.start()
+        except Exception as e:
+            self.mostrar_toast(f"Servidor web no disponible: {e}", "warning")
+            self._servidor_web = None
 
     def _iniciar_hilo(self, cam):
         cam_id = cam.get("id")
@@ -961,6 +993,10 @@ class VentanaPrincipal(FluentWindow):
         if self._enlace_wifi is not None:
             self._enlace_wifi.detener()
             self._enlace_wifi = None
+
+        if self._servidor_web is not None:
+            self._servidor_web.detener()
+            self._servidor_web = None
 
     def _tras_detener(self):
         estado_lcd.actualizar_esperando()

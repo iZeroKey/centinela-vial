@@ -16,7 +16,7 @@ import os, sys
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTableWidgetItem,
-    QHeaderView, QFrame,
+    QHeaderView, QFrame, QBoxLayout,
 )
 from qfluentwidgets import (
     PushButton, LineEdit, SpinBox,
@@ -186,6 +186,8 @@ class PanelClases(QWidget):
         grupo = HeaderCardWidget()
         grupo.setTitle("Cursos y secciones")
         v = grupo.viewLayout
+        # viewLayout es horizontal por defecto: forzar apilado vertical
+        v.setDirection(QBoxLayout.Direction.TopToBottom)
         v.setSpacing(10)
 
         ayuda = CaptionLabel(
@@ -292,6 +294,8 @@ class PanelClases(QWidget):
         grupo = HeaderCardWidget()
         grupo.setTitle("Horarios de clase")
         v = grupo.viewLayout
+        # viewLayout es horizontal por defecto: forzar apilado vertical
+        v.setDirection(QBoxLayout.Direction.TopToBottom)
         v.setSpacing(10)
 
         ayuda = CaptionLabel(
