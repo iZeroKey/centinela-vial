@@ -1,14 +1,14 @@
-// CentinelaCamWifi - servidor de camara para la app Python (asistencia_v5).
-// Hardware: ESP32-CAM AI-Thinker conectado a un ESP32-CAM-MB, sin PSRAM.
+// CentinelaCamWifi - servidor de camara para la app Python (asistencia v6).
+// Hardware: ESP32-CAM AI-Thinker conectado a un ESP32-CAM-MB, con o sin PSRAM.
 //
 // Arquitectura basada en el sketch de Freenove CameraWebServer (esp_http_server,
 // dos instancias): el stream va aislado en su propio servidor, de modo que si un
 // stream queda colgado, el control en el puerto 80 sigue vivo y el stream puede
 // reintentarse en el 81 sin reiniciar la placa.
 //
-//   Puerto 80:  /              info de estado (res, fb=dram)
+//   Puerto 80:  /              info de estado (res, fb, rssi)
 //               /jpg (o /foto) captura instantanea
-//               /res?val=QVGA  mantener/cambiar resolucion (unica sin PSRAM)
+//               /res?val=QVGA  mantener/cambiar resolucion (VGA/SVGA solo con PSRAM)
 //   Puerto 81:  /stream        video MJPEG continuo (multipart/x-mixed-replace)
 //
 // Para la app / el navegador:  http://<ip>:81/stream
@@ -20,8 +20,8 @@
 // ==== red ====
 const char *WIFI_SSID = "wifiprueba";
 const char *WIFI_PASS = "prueba123";
-#define JPEG_QUALITY 25
-#define FPS_MAX 2
+#define JPEG_QUALITY 14
+#define FPS_MAX 12
 #define PUERTO_HTTP 80
 #define PUERTO_STREAM 81
 
@@ -50,8 +50,7 @@ static const char *STREAM_PARTE = "Content-Type: image/jpeg\r\nContent-Length: %
 framesize_t res_actual = FRAMESIZE_QVGA;
 bool fb_en_dram = false;
 httpd_handle_t servidor_ctrl = NULL;
-WiFiServer servidor_tcp(PUERTO_STREAM);
-WiFiClient cliente_tcp;
+httpd_handle_t servidor_stream = NULL;
 
 static const char *nombre_res(framesize_t r) {
   switch (r) {
@@ -157,7 +156,7 @@ static void configura_camara() {
     }
     s->set_brightness(s, 1);
     s->set_saturation(s, 0);
-    s->set_ae_level(s, -3);
+    s->set_ae_level(s, 0);   // era -3: oscurecia y el sensor alargaba el obturador (frames lentos)
     s->set_aec2(s, 1);   // AE mejorado: reacciona mejor con movimiento
     // Mejoras de imagen para OV3660 (sin PSRAM, QVGA)
     s->set_contrast(s, 1);
@@ -178,8 +177,11 @@ static esp_err_t atiende_raiz(httpd_req_t *req) {
   String ip = WiFi.localIP().toString();
   String b = "CentinelaCam OK\nres=" + String(nombre_res(res_actual)) +
              " fb=" + String(fb_en_dram ? "dram" : "psram") +
-             " fps_max=" + String(FPS_MAX) + "\nstream: tcp://" + ip + ":81\n";
-  b += "foto:  http://" + ip + "/jpg\nres soportada: QVGA\n";
+             " fps_max=" + String(FPS_MAX) +
+             " rssi=" + String(WiFi.RSSI()) + " dBm\n";
+  b += "video: http://" + ip + ":81/stream\n";
+  b += "foto:  http://" + ip + "/jpg\n";
+  b += "res:   /res?val=VGA (QVGA|VGA|SVGA)\n";
   responde_texto(req, b);
   return ESP_OK;
 }
@@ -207,7 +209,8 @@ static esp_err_t atiende_res(httpd_req_t *req) {
     if (buf && httpd_req_get_url_query_str(req, buf, lon) == ESP_OK &&
         httpd_query_key_value(buf, "val", valor, sizeof(valor)) == ESP_OK) {
       framesize_t nr;
-      if (res_desde_nombre(String(valor), nr) && nr != res_actual && nr == FRAMESIZE_QVGA) {
+      if (res_desde_nombre(String(valor), nr) && nr != res_actual &&
+          (!fb_en_dram || nr == FRAMESIZE_QVGA)) {
         aplica_resolucion(nr);
         Serial.print("Resolucion -> ");
         Serial.println(nombre_res(nr));
@@ -218,6 +221,40 @@ static esp_err_t atiende_res(httpd_req_t *req) {
   return atiende_raiz(req);
 }
 
+
+static esp_err_t atiende_stream(httpd_req_t *req) {
+  Serial.printf("> GET %s (stream inicio)\n", req->uri);
+  httpd_resp_set_type(req, STREAM_TIPO);
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  httpd_resp_set_hdr(req, "X-Framerate", String(FPS_MAX).c_str());
+
+  const uint32_t intervalo = 1000 / FPS_MAX;
+  uint8_t fallos = 0;
+  while (true) {
+    if (WiFi.status() != WL_CONNECTED) break;
+    uint32_t t0 = millis();
+    camera_fb_t *fb = esp_camera_fb_get();
+    if (!fb || fb->format != PIXFORMAT_JPEG) {
+      if (fb) esp_camera_fb_return(fb);
+      if (++fallos > 10) break;
+      delay(50);
+      continue;
+    }
+    fallos = 0;
+    char parte[96];
+    httpd_resp_send_chunk(req, STREAM_FRONT, strlen(STREAM_FRONT));
+    snprintf(parte, sizeof(parte), STREAM_PARTE, (unsigned int)fb->len);
+    httpd_resp_send_chunk(req, parte, strlen(parte));
+    httpd_resp_send_chunk(req, (const char *)fb->buf, fb->len);
+    esp_camera_fb_return(fb);   // liberar el buffer ANTES del delay: nunca retenido en un envio
+    uint32_t tardo = millis() - t0;
+    if (tardo < intervalo) delay(intervalo - tardo);
+  }
+  // Cliente cerrado o wifi caido: cerrar la respuesta y liberar el handler.
+  // El httpd purga el socket (lru_purge_enable) y queda listo para el siguiente.
+  httpd_resp_send_chunk(req, "\r\n--cerrado--\r\n", 12);
+  return ESP_OK;
+}
 
 static void arranca_servidores() {
   httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
@@ -230,6 +267,7 @@ static void arranca_servidores() {
   httpd_uri_t uri_jpg = { "/jpg", HTTP_GET, atiende_jpg, NULL };
   httpd_uri_t uri_foto = { "/foto", HTTP_GET, atiende_jpg, NULL };
   httpd_uri_t uri_res = { "/res", HTTP_GET, atiende_res, NULL };
+  httpd_uri_t uri_stream = { "/stream", HTTP_GET, atiende_stream, NULL };
 
   if (httpd_start(&servidor_ctrl, &cfg) == ESP_OK) {
     httpd_register_uri_handler(servidor_ctrl, &uri_raiz);
@@ -241,9 +279,19 @@ static void arranca_servidores() {
     Serial.println("No pude arrancar el servidor de control");
   }
 
-  // Servidor TCP crudo para stream de video (sin overhead HTTP)
-  servidor_tcp.begin();
-  Serial.printf("Stream TCP en %s:%d\n", WiFi.localIP().toString().c_str(), PUERTO_STREAM);
+  // Stream MJPEG aislado en su propio servidor HTTP (puerto 81).
+  // El handler de stream SOLO se registra aqui: esp_http_server atiende con un
+  // solo hilo, y registrarlo tambien en el 80 haria que un visor de video
+  // bloqueara /jpg. Con send_wait_timeout=5 y lru_purge, un cliente colgado
+  // expira y se purga solo, sin arrastrar a la camara.
+  cfg.server_port = PUERTO_STREAM;
+  cfg.ctrl_port += 1;
+  if (httpd_start(&servidor_stream, &cfg) == ESP_OK) {
+    httpd_register_uri_handler(servidor_stream, &uri_stream);
+    Serial.printf("Stream http://%s:%d/stream\n", WiFi.localIP().toString().c_str(), PUERTO_STREAM);
+  } else {
+    Serial.println("No pude arrancar el servidor de stream");
+  }
 }
 
 void setup() {
@@ -280,25 +328,12 @@ void setup() {
   Serial.print("\nWiFi conectado. Control: http://");
   Serial.print(WiFi.localIP());
   Serial.println("/");
-  Serial.print("Stream TCP: ");
+  Serial.print("Stream: http://");
   Serial.print(WiFi.localIP());
-  Serial.println(":81");
+  Serial.println(":81/stream");
   Serial.print("Foto: http://");
   Serial.print(WiFi.localIP());
   Serial.println("/jpg");
-}
-
-// Envia un frame por TCP crudo: [4 bytes longitud big-endian][datos JPEG]
-static bool enviar_frame_tcp(WiFiClient &cli, camera_fb_t *fb) {
-  uint32_t len = (uint32_t)fb->len;
-  uint8_t hdr[4];
-  hdr[0] = (len >> 24) & 0xFF;
-  hdr[1] = (len >> 16) & 0xFF;
-  hdr[2] = (len >> 8) & 0xFF;
-  hdr[3] = len & 0xFF;
-  if (cli.write(hdr, 4) != 4) return false;
-  size_t sent = cli.write((const uint8_t *)fb->buf, fb->len);
-  return sent == fb->len;
 }
 
 void loop() {
@@ -309,29 +344,12 @@ void loop() {
     return;
   }
 
-  // Aceptar nuevo cliente TCP si no hay uno conectado
-  if (!cliente_tcp || !cliente_tcp.connected()) {
-    cliente_tcp = servidor_tcp.accept();
-    if (cliente_tcp) {
-      Serial.println("Cliente TCP conectado (stream)");
-    }
+  // Telemetria minima: RSSI y heap cada 5 s para diagnosticar red/memoria
+  // desde el Monitor Serie (el stream vive en su propio hilo httpd).
+  static unsigned long t_rssi = 0;
+  if (millis() - t_rssi >= 5000) {
+    t_rssi = millis();
+    Serial.printf("RSSI: %d dBm, heap: %u\n", WiFi.RSSI(), (unsigned int)ESP.getFreeHeap());
   }
-
-  if (cliente_tcp && cliente_tcp.connected()) {
-    uint32_t t0 = millis();
-    camera_fb_t *fb = esp_camera_fb_get();
-    if (fb && fb->format == PIXFORMAT_JPEG) {
-      if (!enviar_frame_tcp(cliente_tcp, fb)) {
-        // cliente corto la conexion
-        cliente_tcp.stop();
-        Serial.println("Cliente TCP desconectado");
-      }
-    }
-    if (fb) esp_camera_fb_return(fb);
-    uint32_t tardo = millis() - t0;
-    const uint32_t intervalo = 1000 / FPS_MAX;
-    if (tardo < intervalo) delay(intervalo - tardo);
-  } else {
-    delay(100);
-  }
+  delay(25);
 }
