@@ -48,11 +48,45 @@ _RUTA_FAVICON = os.path.join(os.path.dirname(_ROOT_APP), "favicon.svg")
 # Certificado propio (getUserMedia exige HTTPS; el teléfono acepta 1 advertencia)
 # ---------------------------------------------------------------------------
 
+def _ips_cert():
+    """IPs que deben ir en el SAN: loopback + IP LAN actual."""
+    import ipaddress
+    ips = ["127.0.0.1"]
+    ip = ip_local()
+    if ip and ip != "127.0.0.1" and ip not in ips:
+        try:
+            ipaddress.ip_address(ip)
+            ips.append(ip)
+        except ValueError:
+            pass
+    return ips
+
+
 def generar_certificado(ruta_crt=_RUTA_CRT, ruta_key=_RUTA_KEY,
                         hostname="centinela.local"):
-    """Genera un certificado autofirmado la primera vez (10 años)."""
+    """Genera un certificado autofirmado (10 años).
+
+    Se regenera si existe pero NO incluye la IP LAN actual: al entrar por
+    https://<ip>:8443/telefono (centinela.local no resuelve en todas las
+    redes) el SAN debe cubrir esa IP o el navegador trata la página como
+    contexto NO seguro y bloquea getUserMedia (la cámara del teléfono).
+    """
+    import ipaddress
+    ips = _ips_cert()
     if os.path.exists(ruta_crt) and os.path.exists(ruta_key):
-        return
+        try:
+            from cryptography import x509
+            with open(ruta_crt, "rb") as f:
+                cert = x509.load_pem_x509_certificates(f.read())[0]
+            san = cert.extensions.get_extension_for_class(
+                x509.SubjectAlternativeName).value
+            san_ips = {str(i) for i in san.get_values_for_type(x509.IPAddress)}
+            if all(ip in san_ips for ip in ips):
+                return
+            print(f"[WEB] certificado no cubre la IP actual ({ips[-1]}); "
+                  "regenerando (acepta de nuevo el aviso en el teléfono)")
+        except Exception:
+            pass  # cert ilegible/corrupto: regenerar
     os.makedirs(os.path.dirname(ruta_crt), exist_ok=True)
     from cryptography import x509
     from cryptography.x509.oid import NameOID
@@ -64,11 +98,10 @@ def generar_certificado(ruta_crt=_RUTA_CRT, ruta_key=_RUTA_KEY,
     hasta = desde + timedelta(days=3650)
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     nombre = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, hostname)])
-    san = x509.SubjectAlternativeName([
-        x509.DNSName(hostname),
-        x509.DNSName("localhost"),
-        x509.IPAddress(ipaddress.IPv4Address("127.0.0.1")),
-    ])
+    san = x509.SubjectAlternativeName(
+        [x509.DNSName(hostname),
+         x509.DNSName("localhost")]
+        + [x509.IPAddress(ipaddress.ip_address(ip)) for ip in ips])
     cert = (x509.CertificateBuilder()
             .subject_name(nombre)
             .issuer_name(nombre)
@@ -652,11 +685,18 @@ const q = extra => "/api/telefono/" + extra + "?tel=" + encodeURIComponent(tel) 
 
 async function encender(que = camara) {
   if (stream) stream.getTracks().forEach(t => t.stop());
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    $("estado").textContent =
+      "Cámara bloqueada: el navegador exige HTTPS con certificado de confianza " +
+      "(" + location.origin + "/telefono). Vuelve a aceptar el aviso de seguridad.";
+    return;
+  }
   try {
     stream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: que, width: { ideal: 1280 } }, audio: false });
     video.srcObject = stream;
     await video.play();
+    $("estado").textContent = "Cámara en marcha.";
     subir_frames();
   } catch (e) {
     $("estado").textContent = "Sin permiso de cámara: " + e.message;
@@ -671,6 +711,8 @@ $("btn_cam").onclick = () => {
 const lienzo = document.createElement("canvas");
 const contexto = lienzo.getContext("2d");
 let ocupado = false;
+
+let urlFrameActual = null;
 
 async function subir_frames() {
   if (!stream || ocupado) return;
@@ -687,8 +729,11 @@ async function subir_frames() {
       if (blob) {
         const r = await fetch(q("frame"), { method: "POST", body: blob });
         if (r.ok) {
-          img.src = URL.createObjectURL(await r.blob());
-          URL.revokeObjectURL(img.src);
+          const url = URL.createObjectURL(await r.blob());
+          const anterior = urlFrameActual;
+          img.src = url;          // asignar ANTES de revocar la anterior
+          urlFrameActual = url;
+          if (anterior) URL.revokeObjectURL(anterior);
         }
       }
     }

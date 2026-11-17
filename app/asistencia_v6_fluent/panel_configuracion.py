@@ -12,7 +12,7 @@ Los cursos/secciones y los horarios de clase se gestionan en la pestaña
 "Clases" del sidebar (ver panel_clases.py).
 """
 
-import os, sys
+import os, sys, time
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
@@ -33,15 +33,19 @@ from hilo_trabajo import Trabajo
 from camara_hilo import probar_fuente
 import config as config_app
 
-TIPO_ETIQUETAS = {"local": "Webcam local", "http": "Stream HTTP (ESP32)"}
+TIPO_ETIQUETAS = {"local": "Webcam local", "http": "Stream HTTP (ESP32)",
+                  "telefono": "Teléfono"}
+TIPO_INDICE = {"local": 0, "http": 1, "telefono": 2}
 
 
 class DialogoCamara(MessageBoxBase):
     """Alta/edición de una cámara (diálogo Fluent)."""
 
-    def __init__(self, camara=None, cfg=None, parent=None):
+    def __init__(self, camara=None, cfg=None, parent=None, telefonos=None):
         super().__init__(parent=parent)
         self._camara = camara or {}
+        # {tel_id: registro} de teléfonos conocidos por el servidor web
+        self._telefonos = telefonos or {}
 
         self.widget.setMinimumWidth(500)
 
@@ -52,12 +56,27 @@ class DialogoCamara(MessageBoxBase):
         self.edit_nombre = LineEdit()
         self.edit_nombre.setText(self._camara.get("nombre", "") or "")
         self.combo_tipo = ComboBox()
-        self.combo_tipo.addItems([TIPO_ETIQUETAS["local"], TIPO_ETIQUETAS["http"]])
-        self.combo_tipo.setCurrentIndex(0 if self._camara.get("tipo") == "local" else 1)
+        self.combo_tipo.addItems([TIPO_ETIQUETAS["local"],
+                                  TIPO_ETIQUETAS["http"],
+                                  TIPO_ETIQUETAS["telefono"]])
+        self.combo_tipo.setCurrentIndex(TIPO_INDICE.get(
+            self._camara.get("tipo"), 0))
         self.combo_tipo.currentIndexChanged.connect(self._actualizar_placeholder)
 
         self.edit_fuente = LineEdit()
         self.edit_fuente.setText(str(self._camara.get("fuente", "") or ""))
+
+        # Dropdown de teléfonos conectados (solo visible con tipo Teléfono)
+        self.combo_telefono = ComboBox()
+        self._tel_ids = []
+        self._refrescar_combo_telefonos()
+
+        contenedor_fuente = QWidget()
+        hf = QHBoxLayout(contenedor_fuente)
+        hf.setContentsMargins(0, 0, 0, 0)
+        hf.addWidget(self.edit_fuente, 1)
+        hf.addWidget(self.combo_telefono, 1)
+        self.combo_telefono.hide()
         self._actualizar_placeholder()
 
         # Curso cuyo asistencia registra la cámara (opcional, individual
@@ -91,7 +110,7 @@ class DialogoCamara(MessageBoxBase):
 
         self.viewLayout.addLayout(fila("Nombre:", self.edit_nombre))
         self.viewLayout.addLayout(fila("Tipo:", self.combo_tipo))
-        self.viewLayout.addLayout(fila("Fuente:", self.edit_fuente))
+        self.viewLayout.addLayout(fila("Fuente:", contenedor_fuente))
         self.viewLayout.addLayout(fila("Curso:", self.combo_curso))
         self.viewLayout.addLayout(fila("Intervalo:", self.spin_intervalo))
 
@@ -105,6 +124,8 @@ class DialogoCamara(MessageBoxBase):
         ayuda = CaptionLabel(
             "Webcam local usa el índice del dispositivo (0, 1, ...).\n"
             "Stream HTTP es la URL MJPEG de la ESP32 (http://<ip>:81/stream).\n"
+            "Teléfono usa un celular conectado al servidor web: se muestran los\n"
+            "que están conectados (https://<ip>:8443/telefono).\n"
             "El curso es informativo e individual por cámara: se muestra en "
             "Vigilancia para saber a qué clase está marcando.")
         ayuda.setWordWrap(True)
@@ -113,17 +134,72 @@ class DialogoCamara(MessageBoxBase):
         self.yesButton.setText("Guardar")
         self.cancelButton.setText("Cancelar")
 
-    def _actualizar_placeholder(self, *_):
-        if self._tipo() == "local":
-            self.edit_fuente.setPlaceholderText("Índice de webcam (0, 1, ...)")
+    def _refrescar_combo_telefonos(self):
+        """Rellena el dropdown con los teléfonos conocidos por el servidor.
+
+        Conserva la selección previa (o la cámara en edición, si es tipo
+        teléfono) aunque el teléfono ya no esté conectado: se guarda como
+        '(desconectado)' para no perder la asignación en silencio.
+        """
+        seleccion = self.edit_fuente.text().strip() if self._tipo() == "telefono" else ""
+        self.combo_telefono.clear()
+        self._tel_ids = []
+        items = []
+        for tel_id, reg in sorted(
+                self._telefonos.items(),
+                key=lambda kv: (not kv[1].get("online", False),
+                                str(kv[1].get("nombre", "")).lower())):
+            nombre = str(reg.get("nombre", "") or "").strip() or f"Teléfono {tel_id[:8]}"
+            ip = str(reg.get("ip", "") or "?")
+            sufijo = "en línea" if reg.get("online", False) else "desconectado"
+            items.append((f"{nombre} — {ip} ({sufijo})", tel_id))
+        if seleccion and seleccion not in {t for _, t in items}:
+            items.insert(0, (f"(desconectado: {seleccion[:8]})", seleccion))
+        if not items:
+            self.combo_telefono.addItem("(sin teléfonos conectados)")
+            self._tel_ids.append("")
         else:
+            for texto, tel_id in items:
+                self.combo_telefono.addItem(texto)
+                self._tel_ids.append(tel_id)
+        if seleccion in self._tel_ids:
+            self.combo_telefono.setCurrentIndex(self._tel_ids.index(seleccion))
+
+    def _telefono_seleccionado(self):
+        idx = self.combo_telefono.currentIndex()
+        if 0 <= idx < len(self._tel_ids):
+            return self._tel_ids[idx]
+        return ""
+
+    def _actualizar_placeholder(self, *_):
+        tipo = self._tipo()
+        if tipo == "local":
+            self.edit_fuente.setPlaceholderText("Índice de webcam (0, 1, ...)")
+        elif tipo == "http":
             self.edit_fuente.setPlaceholderText("http://<ip>:81/stream")
+        es_telefono = tipo == "telefono"
+        if es_telefono:
+            self._refrescar_combo_telefonos()
+        self.edit_fuente.setVisible(not es_telefono)
+        self.combo_telefono.setVisible(es_telefono)
 
     def _tipo(self):
-        return "local" if self.combo_tipo.currentIndex() == 0 else "http"
+        return {
+            0: "local",
+            1: "http",
+            2: "telefono",
+        }.get(self.combo_tipo.currentIndex(), "local")
 
     def validate(self):
         """MessageBoxBase llama a validate() antes de aceptar el cierre."""
+        if self._tipo() == "telefono":
+            if not self._telefono_seleccionado():
+                aviso(self, "Falta el teléfono",
+                      "No hay teléfonos conectados. Abre "
+                      "https://<ip>:8443/telefono en el celular y pulsa "
+                      "Encender cámara, luego vuelve a abrir este diálogo.")
+                return False
+            return True
         if not self.edit_fuente.text().strip():
             aviso(self, "Falta la fuente",
                   "Indica la fuente de la cámara (índice o URL).")
@@ -134,11 +210,14 @@ class DialogoCamara(MessageBoxBase):
         curso = ""
         if self.combo_curso.currentIndex() > 0:
             curso = self.combo_curso.currentText().strip()
+        tipo = self._tipo()
+        fuente = (self._telefono_seleccionado() if tipo == "telefono"
+                  else self.edit_fuente.text().strip())
         return {
             "id": self._camara.get("id"),   # None en alta; el panel lo asigna
             "nombre": self.edit_nombre.text().strip() or "Cámara",
-            "tipo": self._tipo(),
-            "fuente": self.edit_fuente.text().strip(),
+            "tipo": tipo,
+            "fuente": fuente,
             "curso": curso,
             "activa": self.chk_activa.isChecked(),
             "intervalo_proceso": float(self.spin_intervalo.value()),
@@ -152,6 +231,8 @@ class PanelConfiguracion(QWidget):
     def __init__(self, callbacks=None, parent=None):
         super().__init__(parent)
         self._cb = callbacks or {}
+        # () -> {tel_id: registro} | {} — teléfonos del servidor web
+        self._obtener_telefonos = self._cb.get("obtener_telefonos") or (lambda: {})
         self.cfg = config_app.cargar()
         self._trabajo_prueba = None
 
@@ -233,7 +314,7 @@ class PanelConfiguracion(QWidget):
             valores = [
                 cam.get("nombre", ""),
                 TIPO_ETIQUETAS.get(cam.get("tipo"), str(cam.get("tipo", ""))),
-                cam.get("fuente", ""),
+                self._etiqueta_fuente(cam),
                 cam.get("curso", "") or "(sin curso)",
             ]
             for col, val in enumerate(valores):
@@ -275,8 +356,28 @@ class PanelConfiguracion(QWidget):
         if fn:
             fn(self.cfg)
 
+    def _telefonos_actuales(self):
+        try:
+            telefonos = self._obtener_telefonos() or {}
+            return dict(telefonos)
+        except Exception:
+            return {}
+
+    def _etiqueta_fuente(self, cam):
+        """Fuente legible para la tabla (resuelve el teléfono si hay)."""
+        if cam.get("tipo") == "telefono":
+            tel_id = str(cam.get("fuente", "")).strip()
+            reg = self._telefonos_actuales().get(tel_id)
+            if reg:
+                nombre = str(reg.get("nombre", "") or "").strip() or tel_id[:8]
+                ip = str(reg.get("ip", "") or "?")
+                estado = "en línea" if reg.get("online", False) else "desconectado"
+                return f"{nombre} — {ip} ({estado})"
+            return f"(teléfono {tel_id[:8]})" if tel_id else "(sin teléfono)"
+        return str(cam.get("fuente", ""))
+
     def _agregar_camara(self):
-        dlg = DialogoCamara(None, self.cfg, self)
+        dlg = DialogoCamara(None, self.cfg, self, telefonos=self._telefonos_actuales())
         if dlg.exec():
             cam = dlg.datos()
             cam["id"] = config_app.nuevo_id_camara(self.cfg)
@@ -288,7 +389,8 @@ class PanelConfiguracion(QWidget):
         _cam, fila = self._camara_sel()
         if _cam is None:
             return
-        dlg = DialogoCamara(self.cfg["camaras"][fila], self.cfg, self)
+        dlg = DialogoCamara(self.cfg["camaras"][fila], self.cfg, self,
+                            telefonos=self._telefonos_actuales())
         if dlg.exec():
             self.cfg["camaras"][fila] = dlg.datos()
             self._guardar_y("camaras_cambiadas")
@@ -311,12 +413,36 @@ class PanelConfiguracion(QWidget):
         cam, _fila = self._camara_sel()
         if cam is None:
             return
+        if cam.get("tipo") == "telefono":
+            self._probar_telefono(cam)
+            return
         if self._trabajo_prueba is not None and self._trabajo_prueba.isRunning():
             return
         self._trabajo_prueba = Trabajo(
             lambda: probar_fuente(cam.get("tipo"), cam.get("fuente", "")), self)
         self._trabajo_prueba.listo.connect(self._on_prueba_lista)
         self._trabajo_prueba.start()
+
+    def _probar_telefono(self, cam):
+        """Prueba de una cámara de tipo teléfono (sin hilo: solo registry)."""
+        tel_id = str(cam.get("fuente", "")).strip()
+        reg = self._telefonos_actuales().get(tel_id)
+        if reg is None:
+            aviso(self, "Prueba de cámara",
+                  "El teléfono no está conectado (o el servidor web está "
+                  "detenido). Abre https://<ip>:8443/telefono en el celular.")
+            return
+        if not reg.get("online", False):
+            hace = max(0, round(time.time() - reg.get("visto", time.time())))
+            aviso(self, "Prueba de cámara",
+                  f"Teléfono registrado pero SIN señal: visto hace {hace} s. "
+                  "Revisa la página /telefono en el celular.")
+            return
+        camara = "trasera" if reg.get("camara") == "environment" else (
+            "frontal" if reg.get("camara") == "user" else "desconocida")
+        aviso(self, "Prueba de cámara",
+              f"Teléfono en línea — ip {reg.get('ip', '?')} · "
+              f"cámara {camara}. La imagen llegará al activar la vigilancia.")
 
     def _on_prueba_lista(self, ok, mensaje):
         aviso(self, "Prueba de cámara", mensaje)

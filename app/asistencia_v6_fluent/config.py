@@ -20,7 +20,7 @@ CONFIG_PATH = os.path.join(DATA_DIR, "config.json")
 CAMARA_DEFAULT = {
     "id": "cam_1",
     "nombre": "Aula",
-    "tipo": "http",            # "local" (índice de webcam) | "http" (stream MJPEG)
+    "tipo": "http",            # "local" (índice de webcam) | "http" (stream MJPEG) | "telefono" (celular)
     "fuente": "http://10.245.111.47:81/stream",
     "activa": True,
     "intervalo_proceso": 0.1,  # segundos entre procesados de reconocimiento
@@ -89,6 +89,10 @@ def nuevo_id_camara(cfg):
 def fuente_de_camara(cam):
     """Fuente lista para CamaraHilo a partir del dict de cámara."""
     fuente = str(cam.get("fuente", "")).strip()
+    if cam.get("tipo") == "telefono":
+        # CamaraHilo detecta el prefijo "telefono:" y consume los frames
+        # que el servidor web sube desde el celular (modo teléfono).
+        return f"telefono:{fuente}"
     if cam.get("tipo") == "http":
         return fuente
     return fuente or "0"

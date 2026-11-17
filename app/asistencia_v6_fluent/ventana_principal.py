@@ -450,6 +450,7 @@ class VentanaPrincipal(FluentWindow):
             "camaras_cambiadas": self._on_camaras_cambiadas,
             "parametros_cambiados": self._on_parametros_cambiados,
             "web_cambiado": self._on_web_cambiado,
+            "obtener_telefonos": self._telefonos_para_config,
         })
         self.panel_clases = PanelClases(callbacks={
             "horarios_cambiados": self._on_horarios_cambiados,
@@ -1009,13 +1010,23 @@ class VentanaPrincipal(FluentWindow):
             self._servidor_web = None
         self._actualizar_estado_web_panel()
 
+    def _telefonos_para_config(self):
+        """Teléfonos conocidos por el servidor web (para Configuración)."""
+        servidor = self._servidor_web
+        if servidor is None:
+            return {}
+        try:
+            return servidor.listar_telefonos()
+        except Exception:
+            return {}
+
     def _actualizar_estado_web_panel(self):
         """Pinta en Configuración el estado real del servidor."""
         panel = getattr(self, "panel_config", None)
         if panel is None:
             return
         activo = self._servidor_web is not None
-        url = f"https://{ip_local()}:8443" if activo else ""
+        url = f"https://{ip_local()}:8443/telefono" if activo else ""
         panel.actualizar_estado_web(activo, url)
 
     def _on_web_cambiado(self, cfg):
@@ -1030,6 +1041,21 @@ class VentanaPrincipal(FluentWindow):
             self.mostrar_toast("Servidor web detenido", "info")
 
     # ---------------- Telefonos como camaras (Fase 1b) ----------------
+    def _hilo_asignado_para(self, tel_id):
+        """Hilo de la cámara de config asignada a este teléfono, si existe.
+
+        Si el teléfono está dado de alta como cámara (tipo "telefono" con la
+        fuente = tel_id) y la vigilancia está arrancada, los frames del
+        teléfono entran por ese hilo: aparecen en Vigilancia y registran
+        asistencia como una cámara más. Sin asignación (o vigilancia
+        detenida) se usa el hilo virtual de abajo.
+        """
+        for cam in self.cfg.get("camaras", []):
+            if (cam.get("tipo") == "telefono"
+                    and str(cam.get("fuente", "")).strip() == tel_id):
+                return self.hilos.get(cam.get("id"))
+        return None
+
     def _crear_hilo_telefono(self, tel_id, nombre):
         """Devuelve el CamaraHilo del telefono, creandolo si no existe.
 
@@ -1088,7 +1114,9 @@ class VentanaPrincipal(FluentWindow):
                              cv2.IMREAD_COLOR)
         if frame is None:
             return None
-        hilo = self._crear_hilo_telefono(tel_id, nombre)
+        hilo = self._hilo_asignado_para(tel_id)
+        if hilo is None:
+            hilo = self._crear_hilo_telefono(tel_id, nombre)
         if hilo is None:
             return None
         hilo.set_referencias(list(self.referencias))

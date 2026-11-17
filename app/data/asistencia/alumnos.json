@@ -7976,7 +7976,7 @@
     },
     {
       "alumno_id": "E016",
-      "nombre": "ALUMNO E016",
+      "nombre": "noseee",
       "foto_referencia": "referencia/E016.jpeg",
       "embedding": [
         0.036938443779945374,
@@ -8495,14 +8495,25 @@
       "estado": "activo",
       "fecha_registro": "2026-10-20T20:54:07.424448",
       "curso": "GESTION DE INTERNET DE LAS COSAS",
-      "actualizado_en": "2026-11-12T23:37:49.521713",
+      "actualizado_en": "2026-11-17T16:02:36.349306",
       "seccion": "C1",
       "inscripciones": [
         {
           "curso": "GESTION DE INTERNET DE LAS COSAS",
           "seccion": "C1"
         }
-      ]
+      ],
+      "apellidos": "",
+      "dni": "",
+      "telefono": "",
+      "email": "",
+      "tutor_nombre": "",
+      "tutor_telefono": "",
+      "condicion": "regular",
+      "observaciones": "",
+      "fecha_nacimiento": "",
+      "sexo": "",
+      "direccion": ""
     },
     {
       "alumno_id": "E017",

@@ -1,0 +1,66 @@
+{
+  "host_lcd": "centinela-lcd.local",
+  "camaras": [
+    {
+      "id": "cam_1",
+      "nombre": "Webcam",
+      "tipo": "local",
+      "fuente": "0",
+      "curso": "GESTION DE INTERNET DE LAS COSAS",
+      "activa": true,
+      "intervalo_proceso": 0.1
+    },
+    {
+      "id": "cam_2",
+      "nombre": "ESP32-S3",
+      "tipo": "http",
+      "fuente": "http://centinela-cam.local:81/stream",
+      "curso": "GESTION DE INTERNET DE LAS COSAS",
+      "activa": false,
+      "intervalo_proceso": 0.1
+    }
+  ],
+  "cursos": [
+    {
+      "nombre": "GESTION DE INTERNET DE LAS COSAS",
+      "secciones": [
+        "C1"
+      ],
+      "clases": 15
+    }
+  ],
+  "horarios": [
+    {
+      "id": "h1",
+      "nombre": "Gestión IoT C1",
+      "curso": "GESTION DE INTERNET DE LAS COSAS",
+      "dias": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+      ],
+      "inicio": "06:10",
+      "fin": "10:30",
+      "desde": "2026-11-06",
+      "hasta": "2026-11-20",
+      "seccion": "C1"
+    }
+  ],
+  "asistencia": {
+    "umbral_similitud": 0.7,
+    "segundos_confirmacion": 3.0,
+    "intervalo_antiduplicado": 30,
+    "umbral_lcd_nombre": 0.3,
+    "duracion_resultado_lcd": 3.0,
+    "modo_escaneo": "uno",
+    "tolerancia_tardanza_min": 5,
+    "aplicar_horarios": false
+  },
+  "web": {
+    "habilitar": true
+  }
+}

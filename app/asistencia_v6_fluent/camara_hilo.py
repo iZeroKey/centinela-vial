@@ -438,7 +438,10 @@ class CamaraHilo(QThread):
 
     def _abrir(self):
         if self._es_telefono:
-            return  # no hay stream que abrir: los frames llegan por HTTP
+            # no hay stream que abrir: los frames llegan por HTTP. Marcar la
+            # cámara como activa para la tarjeta de Vigilancia.
+            self.estado_camara.emit(True)
+            return
         self._es_url = self._es_url_http(self.fuente)
 
         if self._es_url:
@@ -453,9 +456,9 @@ class CamaraHilo(QThread):
         else:
             # Cámara local (índice numérico)
             try:
-                fuente = int(fuente)
+                fuente = int(self.fuente)
             except (TypeError, ValueError):
-                raise RuntimeError(f"Fuente inválida: {fuente}")
+                raise RuntimeError(f"Fuente inválida: {self.fuente}")
             self._cap = cv2.VideoCapture(fuente)
             if not self._cap.isOpened():
                 raise RuntimeError(f"No se pudo abrir la cámara {fuente}")

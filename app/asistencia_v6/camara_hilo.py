@@ -316,9 +316,9 @@ class CamaraHilo(QThread):
         else:
             # Cámara local (índice numérico)
             try:
-                fuente = int(fuente)
+                fuente = int(self.fuente)
             except (TypeError, ValueError):
-                raise RuntimeError(f"Fuente inválida: {fuente}")
+                raise RuntimeError(f"Fuente inválida: {self.fuente}")
             self._cap = cv2.VideoCapture(fuente)
             if not self._cap.isOpened():
                 raise RuntimeError(f"No se pudo abrir la cámara {fuente}")

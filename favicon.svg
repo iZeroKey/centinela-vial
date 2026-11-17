@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="32" height="32">
+  <rect width="64" height="64" rx="14" fill="#000000" />
+  <g fill="#4ADE80">
+    <!-- Primera "C" -->
+    <rect x="11.5" y="14.5" width="5" height="5" />
+    <rect x="17.5" y="14.5" width="5" height="5" />
+    <rect x="5.5" y="20.5" width="5" height="5" />
+    <rect x="23.5" y="20.5" width="5" height="5" />
+    <rect x="5.5" y="26.5" width="5" height="5" />
+    <rect x="5.5" y="32.5" width="5" height="5" />
+    <rect x="5.5" y="38.5" width="5" height="5" />
+    <rect x="23.5" y="38.5" width="5" height="5" />
+    <rect x="11.5" y="44.5" width="5" height="5" />
+    <rect x="17.5" y="44.5" width="5" height="5" />
+
+    <!-- Segunda "C" -->
+    <rect x="41.5" y="14.5" width="5" height="5" />
+    <rect x="47.5" y="14.5" width="5" height="5" />
+    <rect x="35.5" y="20.5" width="5" height="5" />
+    <rect x="53.5" y="20.5" width="5" height="5" />
+    <rect x="35.5" y="26.5" width="5" height="5" />
+    <rect x="35.5" y="32.5" width="5" height="5" />
+    <rect x="35.5" y="38.5" width="5" height="5" />
+    <rect x="53.5" y="38.5" width="5" height="5" />
+    <rect x="41.5" y="44.5" width="5" height="5" />
+    <rect x="47.5" y="44.5" width="5" height="5" />
+  </g>
+</svg>
