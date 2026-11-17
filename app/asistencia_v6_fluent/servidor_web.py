@@ -40,6 +40,8 @@ _ROOT_APP = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _DIR_CERTS = os.path.join(_ROOT_APP, "data", "certs")
 _RUTA_CRT = os.path.join(_DIR_CERTS, "centinela.crt")
 _RUTA_KEY = os.path.join(_DIR_CERTS, "centinela.key")
+# favicon.svg vive en la raiz del repo (un nivel por encima de app/)
+_RUTA_FAVICON = os.path.join(os.path.dirname(_ROOT_APP), "favicon.svg")
 
 
 # ---------------------------------------------------------------------------
@@ -88,15 +90,37 @@ def generar_certificado(ruta_crt=_RUTA_CRT, ruta_key=_RUTA_KEY,
 
 
 def ip_local():
-    """IP LAN de esta máquina (para mostrar la URL alternativa en el visor)."""
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    """IP LAN de esta máquina. Evita salir a Internet (8.8.8.8)."""
+    # 1) nombre del host: normalmente el DNS local devuelve la IP del adaptador
     try:
-        s.connect(("8.8.8.8", 80))
+        hostname = socket.gethostname()
+        ip = socket.gethostbyname(hostname)
+        if not ip.startswith("127."):
+            return ip
+    except Exception:
+        pass
+    # 2) getaddrinfo: filtra el primer IPv4 no-loopback
+    try:
+        infos = socket.getaddrinfo(socket.gethostname(), 80,
+                                   socket.AF_INET, socket.SOCK_DGRAM)
+        for fam, _, _, _, sockaddr in infos:
+            ip = sockaddr[0]
+            if not ip.startswith("127."):
+                return ip
+    except Exception:
+        pass
+    # 3) último intento: la IP de la ruta LAN
+    s = None
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(0.3)
+        s.connect(("192.0.2.1", 80))  # TEST-NET-1, sin tráfico real
         return s.getsockname()[0]
     except Exception:
         return "127.0.0.1"
     finally:
-        s.close()
+        if s is not None:
+            s.close()
 
 
 # ---------------------------------------------------------------------------
@@ -147,6 +171,21 @@ class _Handler(BaseHTTPRequestHandler):
         try:
             if ruta == "/ping":
                 self._json({"ok": True, "ts": datetime.now().isoformat()})
+            elif ruta == "/api/ip":
+                self._json({"ip": ip_local(), "puerto": PUERTO_HTTPS,
+                            "url": f"https://{ip_local()}:{PUERTO_HTTPS}/"})
+            elif ruta == "/favicon.svg" or ruta == "/favicon.ico":
+                try:
+                    with open(_RUTA_FAVICON, "rb") as f:
+                        cuerpo = f.read()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "image/svg+xml")
+                    self.send_header("Content-Length", str(len(cuerpo)))
+                    self.send_header("Cache-Control", "max-age=86400")
+                    self.end_headers()
+                    self.wfile.write(cuerpo)
+                except OSError:
+                    self._json({"error": "favicon no encontrado"}, 404)
             elif ruta == "/api/asistencia":
                 import db as db_centinela
                 filas = db_centinela.obtener_estado_hoy()
@@ -199,6 +238,11 @@ class _Handler(BaseHTTPRequestHandler):
                 self._telefono_frame(params)
             elif ruta == "/api/telefono/heartbeat":
                 self._telefono_heartbeat(params)
+            elif ruta == "/api/telefono/politica":
+                tel_id = (params.get("tel") or "").strip()
+                ok = self.servidor.fijar_estado(tel_id,
+                                                params.get("estado", ""))
+                self._json({"ok": ok}, 200 if ok else 400)
             else:
                 self._json({"error": "ruta desconocida"}, 404)
         except (ConnectionError, BrokenPipeError, ssl.SSLError):
@@ -424,6 +468,30 @@ class ServidorWeb:
                 pass
             self._zeroconf, self._info = None, None
 
+    # -- politicas de telefonos (Fase 1c) ------------------------------------
+    ESTADOS_TELEFONO = ("libre", "controles_ocultos", "bloqueado")
+
+    def fijar_estado(self, tel_id, estado):
+        """Fija la politica de un telefono desde el panel del PC."""
+        estado = str(estado).strip()
+        if estado not in self.ESTADOS_TELEFONO:
+            return False
+        with self._lock_tel:
+            reg = self.telefonos.get(tel_id)
+            if reg is None:
+                return False
+            reg["estado"] = estado
+            return True
+
+    def listar_telefonos(self):
+        """Copia del registro para la GUI (con marca online/caido)."""
+        ahora = time.time()
+        with self._lock_tel:
+            return {tel: dict(reg,
+                              online=(ahora - reg["visto"])
+                              <= self.TIEMPO_TELEFONO_CAIDO)
+                    for tel, reg in self.telefonos.items()}
+
 
 # ---------------------------------------------------------------------------
 # Visor web (página única, sin dependencias externas)
@@ -434,6 +502,7 @@ _PAGINA_VISOR = """<!DOCTYPE html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Centinela — Visor</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
@@ -457,6 +526,10 @@ _PAGINA_VISOR = """<!DOCTYPE html>
   .otro      { background: #1d1d24; color: #8b97a8; }
   .nodos span { margin-right: 14px; font-size: 13px; }
   .on  { color: #34d399; } .off { color: #f87171; }
+  .ip { font-size: 11px; color: #8b97a8; margin-top: 10px;
+        padding: 8px 12px; background: #16161c; border: 1px solid #26262e;
+        border-radius: 10px; }
+  .ip code { color: #e4e4e7; user-select: all; }
 </style></head><body>
 <header>
   <h1>Centinela — Asistencia de aula</h1>
@@ -472,6 +545,17 @@ _PAGINA_VISOR = """<!DOCTYPE html>
     <th>Estado</th><th>Entrada</th><th>Salida</th>
   </tr></thead><tbody id="filas"><tr><td colspan="6">Cargando…</td></tr></tbody></table>
 </main>
+<div class="ip" style="position:fixed; bottom:10px; left:10px; max-width:calc(100% - 20px);">
+  Si <b>centinela.local</b> no resuelve en tu red, entra directo por IP:
+  <code id="ip-url">cargando…</code>
+</div>
+<script>
+fetch("/api/ip").then(r => r.json()).then(d => {
+  document.getElementById("ip-url").textContent = d.url;
+}).catch(() => {
+  document.getElementById("ip-url").textContent = location.origin;
+});
+</script>
 <script>
 const f = s => (s || "").replace("T", " ").slice(11, 16);
 async function refrescar() {
@@ -509,6 +593,7 @@ _PAGINA_TELEFONO = """<!DOCTYPE html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
 <title>Centinela — Cámara</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
@@ -528,6 +613,8 @@ _PAGINA_TELEFONO = """<!DOCTYPE html>
           background: #18181b; color: #e4e4e7; font-size: 14px; flex: 1;
           min-width: 120px; }
   #estado { font-size: 12px; color: #8b97a8; width: 100%; }
+  #ip { font-size: 11px; color: #8b97a8; width: 100%; }
+  #ip code { color: #e4e4e7; user-select: all; }
   .oculto { display: none !important; }
   body.bloqueado #controles { display: none; }
   body.bloqueado { cursor: none; }
@@ -536,9 +623,17 @@ _PAGINA_TELEFONO = """<!DOCTYPE html>
 <div id="controles">
   <input id="nombre" placeholder="Tu nombre (opcional)" autocomplete="off">
   <button id="btn_cam" class="primario">📷 Cámara</button>
+  <div id="estado"></div>
+  <div id="ip">Si centinela.local no resuelve: <code id="ip-url">cargando…</code></div>
 </div>
 <video id="video" autoplay playsinline muted></video>
 <script>
+fetch("/api/ip").then(r => r.json()).then(d => {
+  document.getElementById("ip-url").textContent = d.url + "telefono";
+}).catch(() => {
+  document.getElementById("ip-url").textContent = "https://" + location.hostname + ":8443/telefono";
+});
+
 const $ = id => document.getElementById(id);
 const video = $("video"), img = $("foto");
 let stream = null, camara = "environment";
