@@ -37,6 +37,10 @@ import numpy as np
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
+# Opener HTTP sin proxy: el stream va por LAN directa y un proxy del sistema
+# (tipico en red de campus) romperia la lectura del MJPEG.
+_OPENER_SIN_PROXY = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from rostros import pipeline_embeddings
 
@@ -113,7 +117,6 @@ class CamaraHilo(QThread):
         self._reader_thread = None
         self._reader_stop = threading.Event()
         self._ultimo_frame_raw = None  # ultimo frame leido (para preview sin bloqueo)
-        self._tcp_mode = False
 
     # ---------------- Referencias en caliente ----------------
     def set_referencias(self, nuevas):
@@ -408,35 +411,32 @@ class CamaraHilo(QThread):
     def _es_url_http(self, fuente):
         return isinstance(fuente, str) and fuente.lower().startswith(("http://", "https://", "tcp://"))
 
+    def _url_http_normalizada(self):
+        """Normaliza la fuente a una URL HTTP MJPEG del firmware actual.
+
+        CentinelaCamWifi sirve el stream como HTTP MJPEG en el puerto 81
+        (/stream). Configs antiguas podian guardar scheme tcp:// o URL sin
+        ruta; aqui se corrigen para abrir SIEMPRE por HTTP. El antiguo
+        "TCP crudo" ([4 bytes len][JPEG]) ya no existe en el firmware.
+        """
+        from urllib.parse import urlparse, urlunparse
+        parsed = urlparse(str(self.fuente).strip())
+        scheme = "http" if parsed.scheme in ("", "tcp") else parsed.scheme
+        path = parsed.path if parsed.path not in ("", "/") else "/stream"
+        return urlunparse((scheme, parsed.netloc, path, "", "", ""))
+
     def _abrir(self):
-        fuente = self.fuente
-        self._es_url = self._es_url_http(fuente)
+        self._es_url = self._es_url_http(self.fuente)
 
         if self._es_url:
-            # Detectar si es stream TCP crudo (puerto 81 o scheme tcp)
-            from urllib.parse import urlparse
-            parsed = urlparse(fuente)
-            host = parsed.hostname
-            port = parsed.port
-            usar_tcp = (parsed.scheme == "tcp") or (port == 81) or (port is None and "81" in fuente)
-            if usar_tcp:
-                if port is None:
-                    port = 81
-                # Conexion TCP cruda
-                sock = socket.create_connection((host, port), timeout=5)
-                sock.settimeout(5)
-                self._stream = sock.makefile("rb")
-                self._sock = sock
-                self._tcp_mode = True
-            else:
-                # Leer stream MJPEG por HTTP manualmente
-                req = urllib.request.Request(
-                    fuente,
-                    headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
-                )
-                self._stream = urllib.request.urlopen(req, timeout=5)
-                self._tcp_mode = False
-                self._leer_hasta_boundary()
+            # Stream MJPEG por HTTP manualmente (el puerto 81 de la camara es HTTP;
+            # no se infiere el modo por numero de puerto).
+            req = urllib.request.Request(
+                self._url_http_normalizada(),
+                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
+            )
+            self._stream = _OPENER_SIN_PROXY.open(req, timeout=5)
+            self._leer_hasta_boundary()
         else:
             # Cámara local (índice numérico)
             try:
@@ -488,23 +488,13 @@ class CamaraHilo(QThread):
                 except Exception:
                     pass
                 self._stream = None
-            if getattr(self, "_tcp_mode", False):
-                from urllib.parse import urlparse
-                parsed = urlparse(self.fuente)
-                host = parsed.hostname
-                port = parsed.port or 81
-                sock = socket.create_connection((host, port), timeout=5)
-                sock.settimeout(5)
-                self._stream = sock.makefile("rb")
-                self._sock = sock
-            else:
-                req = urllib.request.Request(
-                    self.fuente,
-                    headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
-                )
-                self._stream = urllib.request.urlopen(req, timeout=5)
-                self._leer_hasta_boundary()
-                self._mjpeg_buf = b""
+            req = urllib.request.Request(
+                self._url_http_normalizada(),
+                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
+            )
+            self._stream = _OPENER_SIN_PROXY.open(req, timeout=5)
+            self._leer_hasta_boundary()
+            self._mjpeg_buf = b""
             print(f"[CAM] {time.strftime('%H:%M:%S')} stream reconectado")
             return True
         except Exception as e:
@@ -530,60 +520,14 @@ class CamaraHilo(QThread):
     def _leer_frame(self):
         """
         Devuelve (ok, frame_bgr).
-        Para URLs TCP lee [4 bytes len][JPEG].
         Para URLs HTTP lee el stream MJPEG frame por frame.
         Para cámaras locales usa cv2.VideoCapture.read().
         """
         if self._es_url:
-            if getattr(self, "_tcp_mode", False):
-                return self._leer_frame_tcp()
             return self._leer_frame_mjpeg()
         else:
             ok, frame = self._cap.read()
             return ok, frame
-
-    def _leer_frame_tcp(self):
-        """Lee un frame JPEG del stream TCP crudo: [4 bytes len][JPEG]."""
-        stream = self._stream
-        # Leer 4 bytes de longitud
-        hdr = b""
-        while len(hdr) < 4 and self._corriendo:
-            try:
-                chunk = stream.read(4 - len(hdr))
-            except (TimeoutError, OSError, ValueError, AttributeError) as e:
-                print(f"[CAM] tcp read hdr fallo: {type(e).__name__}: {e}")
-                return False, None
-            if not chunk:
-                print("[CAM] tcp stream cerro (EOF)")
-                return False, None
-            hdr += chunk
-        if len(hdr) < 4:
-            return False, None
-        lon = (hdr[0] << 24) | (hdr[1] << 16) | (hdr[2] << 8) | hdr[3]
-        if lon <= 0 or lon > 2_000_000:
-            print(f"[CAM] tcp longitud invalida: {lon}")
-            return False, None
-        # Leer lon bytes del JPEG
-        buf = b""
-        while len(buf) < lon and self._corriendo:
-            try:
-                chunk = stream.read(min(4096, lon - len(buf)))
-            except (TimeoutError, OSError, ValueError, AttributeError) as e:
-                print(f"[CAM] tcp read body fallo: {type(e).__name__}: {e}")
-                return False, None
-            if not chunk:
-                print("[CAM] tcp stream cerro (EOF) durante body")
-                return False, None
-            buf += chunk
-        if len(buf) < lon:
-            return False, None
-        arr = np.frombuffer(buf, dtype=np.uint8)
-        frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-        if frame is not None:
-            self._intentos_reconexion = 0
-            return True, frame
-        print("[CAM] tcp decode fallo")
-        return False, None
 
     def _leer_frame_mjpeg(self):
         """Lee un frame JPEG del stream multipart de la cámara ESP32."""
@@ -668,12 +612,6 @@ class CamaraHilo(QThread):
             except Exception:
                 pass
             self._stream = None
-        if getattr(self, "_sock", None) is not None:
-            try:
-                self._sock.close()
-            except Exception:
-                pass
-            self._sock = None
 
     def _centro(self, caja):
         x1, y1, x2, y2 = caja
@@ -875,7 +813,7 @@ def probar_fuente(tipo, fuente, segundos=6.0):
                 headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
             )
             t0 = time.time()
-            with urllib.request.urlopen(req, timeout=segundos) as r:
+            with _OPENER_SIN_PROXY.open(req, timeout=segundos) as r:
                 datos = r.read(8192)
             if not datos:
                 return False, "Conectó pero no llegó ningún dato."
