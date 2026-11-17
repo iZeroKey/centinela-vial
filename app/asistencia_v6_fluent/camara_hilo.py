@@ -118,6 +118,13 @@ class CamaraHilo(QThread):
         self._reader_stop = threading.Event()
         self._ultimo_frame_raw = None  # ultimo frame leido (para preview sin bloqueo)
 
+        # Modo telefono: la "fuente" es telefono:<id> y los frames llegan
+        # subidos por HTTP (servidor_web). Mismo pipeline y misma logica de
+        # confirmacion que una camara fisica.
+        self._es_telefono = isinstance(fuente, str) and fuente.startswith("telefono:")
+        self._cola_telefono = queue.Queue(maxsize=2)
+        self._ultimo_frame_ts = 0.0
+
     # ---------------- Referencias en caliente ----------------
     def set_referencias(self, nuevas):
         """Reemplaza las referencias aunque el hilo esté corriendo."""
@@ -134,6 +141,7 @@ class CamaraHilo(QThread):
         self._tracks = {}
         self._next_track_id = 0
         self._ultimo_frame = None
+        self._ultimo_frame_ts = 0.0
         self._ultimas_detecciones = []
         self._mjpeg_buf = b""
         self._intentos_reconexion = 0
@@ -234,6 +242,9 @@ class CamaraHilo(QThread):
                 print(f"[MED] lectura+decode={t_lec*1000:.0f} ms  procesando={self._procesando}")
 
             if not ok or frame is None:
+                if self._es_telefono:
+                    # sin frame nuevo del telefono: normal (nadie subio todavia)
+                    continue
                 self._frames_consecutivos_fallidos += 1
                 ahora_f = time.time()
                 if self._t_inicio_fallo is None:
@@ -426,6 +437,8 @@ class CamaraHilo(QThread):
         return urlunparse((scheme, parsed.netloc, path, "", "", ""))
 
     def _abrir(self):
+        if self._es_telefono:
+            return  # no hay stream que abrir: los frames llegan por HTTP
         self._es_url = self._es_url_http(self.fuente)
 
         if self._es_url:
@@ -520,9 +533,15 @@ class CamaraHilo(QThread):
     def _leer_frame(self):
         """
         Devuelve (ok, frame_bgr).
+        Modo telefono: extrae de la cola de frames subidos por el telefono.
         Para URLs HTTP lee el stream MJPEG frame por frame.
         Para cámaras locales usa cv2.VideoCapture.read().
         """
+        if self._es_telefono:
+            try:
+                return True, self._cola_telefono.get(timeout=0.5)
+            except queue.Empty:
+                return False, None
         if self._es_url:
             return self._leer_frame_mjpeg()
         else:
@@ -782,11 +801,42 @@ class CamaraHilo(QThread):
         mostrar, detecciones = self._preparar_display(anotado, detecciones)
         self._dibujar(mostrar, detecciones)
         self._ultimo_frame = mostrar
+        self._ultimo_frame_ts = time.time()
         self._ultimas_detecciones = detecciones
 
     @property
     def frame_actual(self):
         return self._ultimo_frame
+
+    # ---------------- Modo telefono (servidor_web) ----------------
+    def recibir_frame_telefono(self, frame):
+        """Encola un frame subido por el telefono. Hilo del servidor web."""
+        # espera breve al arranque del hilo (carrera start() vs primer frame)
+        fin = time.time() + 1.0
+        while not self._corriendo and time.time() < fin:
+            time.sleep(0.02)
+        if not self._corriendo:
+            return False
+        try:
+            self._cola_telefono.put_nowait(frame)
+        except queue.Full:
+            pass  # descarta atrasados: siempre interesa el mas reciente
+        return True
+
+    def esperar_frame_anotado(self, ts_enviado, timeout=0.8):
+        """Espera hasta que haya un frame anotado posterior a ts_enviado.
+
+        Se llama desde el hilo del servidor web justo despues de encolar el
+        frame del telefono; devuelve el frame anotado o None si no hubo
+        tiempo de procesarlo (telefono con señal debil, CPU saturada...).
+        """
+        fin = time.time() + timeout
+        while time.time() < fin:
+            if (self._ultimo_frame_ts > ts_enviado
+                    and self._ultimo_frame is not None):
+                return self._ultimo_frame
+            time.sleep(0.02)
+        return None
 
     def detener(self):
         self._corriendo = False

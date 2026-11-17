@@ -14,11 +14,13 @@ Los alumno_id son internos y nunca se muestran en la interfaz.
 """
 
 import os, sys, time, csv
+import threading
 from datetime import datetime, date
 
 import cv2
+import numpy as np
 
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QRect, QRectF
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QRect, QRectF, QEvent
 from PyQt6.QtGui import (QImage, QPixmap, QFont, QColor, QShortcut, QKeySequence,
                          QPainter, QPen, QBrush, QPainterPath)
 from PyQt6.QtWidgets import (
@@ -56,6 +58,22 @@ from servidor_web import ServidorWeb
 # Hueco de video integrado a la tarjeta Fluent (transparente, sin borde).
 ESTILO_VIDEO = "background: transparent; border: none; color: #a5a5a5; font-size: 14px;"
 RADIO_VIDEO = 10
+
+
+class _EventoCrearHiloTel(QEvent):
+    """Crea el CamaraHilo de un telefono en el hilo GUI (via postEvent).
+
+    El servidor web recibe los frames en SU hilo, pero los QThread de
+    inferencia deben vivir en el hilo GUI (afinidad de sus senales).
+    """
+
+    TIPO = QEvent.Type(QEvent.registerEventType())
+
+    def __init__(self, tel_id, caja, listo):
+        super().__init__(self.TIPO)
+        self.tel_id = tel_id
+        self.caja = caja      # dict de salida: {"hilo": CamaraHilo}
+        self.listo = listo    # threading.Event
 
 
 def _color_acento_windows(fallback="#2dd4bf"):
@@ -370,6 +388,8 @@ class VentanaPrincipal(FluentWindow):
         self._info_alumnos = {}          # alumno_id -> nombre/inscripciones
         self._avisos_fuera_horario = {}  # alumno_id -> ts del ultimo aviso
         self._servidor_web = None
+        self.hilos_telefono = {}         # tel_id -> CamaraHilo en modo telefono
+        self._lock_tel = threading.Lock()
 
         db_centinela.init_db()
         gestor.sincronizar_db()
@@ -452,6 +472,16 @@ class VentanaPrincipal(FluentWindow):
     def closeEvent(self, event):
         self._detener_camaras()
         event.accept()
+
+    def event(self, ev):
+        """Atiende _EventoCrearHiloTel (marshal del hilo del servidor web)."""
+        if isinstance(ev, _EventoCrearHiloTel):
+            try:
+                self._crear_hilo_telefono_en_gui(ev.tel_id, ev.caja)
+            finally:
+                ev.listo.set()
+            return True
+        return super().event(ev)
 
     def eventFilter(self, obj, event):
         from PyQt6.QtCore import QEvent
@@ -931,7 +961,11 @@ class VentanaPrincipal(FluentWindow):
 
         def provedor_frame():
             for hilo in self.hilos.values():
-                frame = hilo.frame_actual()
+                frame = hilo.frame_actual
+                if frame is not None:
+                    return frame
+            for hilo in self.hilos_telefono.values():
+                frame = hilo.frame_actual
                 if frame is not None:
                     return frame
             return None
@@ -944,11 +978,95 @@ class VentanaPrincipal(FluentWindow):
             }}
 
         try:
-            self._servidor_web = ServidorWeb(provedor_frame, provedor_estado)
+            self._servidor_web = ServidorWeb(
+                provedor_frame, provedor_estado,
+                al_frame_telefono=self._al_frame_telefono)
             self._servidor_web.start()
         except Exception as e:
+            import traceback
+            print("[WEB] servidor no disponible:\n"
+                  + traceback.format_exc(), flush=True)
             self.mostrar_toast(f"Servidor web no disponible: {e}", "warning")
             self._servidor_web = None
+
+    # ---------------- Telefonos como camaras (Fase 1b) ----------------
+    def _crear_hilo_telefono(self, tel_id, nombre):
+        """Devuelve el CamaraHilo del telefono, creandolo si no existe.
+
+        Se llama desde el hilo del servidor web, pero el QThread debe vivir
+        en el hilo GUI (afinidad de sus senales): la creacion se marshaliza
+        con QTimer.singleShot y se espera la confirmacion con un Event.
+        """
+        with self._lock_tel:
+            hilo = self.hilos_telefono.get(tel_id)
+            if hilo is not None:
+                return hilo
+            listo = threading.Event()
+            caja = {}
+            QApplication.postEvent(self, _EventoCrearHiloTel(tel_id, caja, listo))
+            if not listo.wait(3.0):
+                print(f"[TEL] {tel_id}: timeout creando el hilo de inferencia")
+                return None
+            return caja.get("hilo")
+
+    def _crear_hilo_telefono_en_gui(self, tel_id, caja):
+        """Crea y arranca el hilo de inferencia del telefono (hilo GUI)."""
+        try:
+            asist = self.cfg.get("asistencia", {})
+            nuevo = CamaraHilo(
+                f"telefono:{tel_id}",
+                list(self.referencias),
+                umbral_global=float(asist.get("umbral_similitud", 0.70)),
+                intervalo_segundos=0.1,
+                confirm_seg=float(asist.get("segundos_confirmacion", 3.0)),
+                modo_escaneo=str(asist.get("modo_escaneo", "uno")),
+            )
+            nuevo.cara_confirmada.connect(
+                lambda tid, n, a, s, caja_, cid=tel_id:
+                    self._on_confirmada(cid, tid, n, a, s))
+            nuevo.error.connect(
+                lambda msg, cid=tel_id: self._on_error_telefono(cid, msg))
+            nuevo.start()
+            caja["hilo"] = nuevo
+            self.hilos_telefono[tel_id] = nuevo
+        except Exception as e:
+            print(f"[TEL] no se pudo crear el hilo de {tel_id}: {e}")
+
+    def _on_error_telefono(self, tel_id, mensaje):
+        hilo = self.hilos_telefono.get(tel_id)
+        nombre = getattr(hilo, "fuente", tel_id)
+        self.mostrar_toast(f"Teléfono {nombre}: {mensaje}", "warning")
+
+    def _al_frame_telefono(self, tel_id, nombre, jpg_bytes):
+        """Foto subida por un telefono -> IA -> JPEG anotado.
+
+        Corre en el HILO DEL SERVIDOR WEB (no toca la GUI): decodifica,
+        encola el frame en el CamaraHilo virtual del telefono y espera la
+        respuesta anotada del worker de inferencia.
+        """
+        frame = cv2.imdecode(np.frombuffer(jpg_bytes, np.uint8),
+                             cv2.IMREAD_COLOR)
+        if frame is None:
+            return None
+        hilo = self._crear_hilo_telefono(tel_id, nombre)
+        if hilo is None:
+            return None
+        hilo.set_referencias(list(self.referencias))
+        ts = time.time()
+        if not hilo.recibir_frame_telefono(frame):
+            return None
+        anotado = hilo.esperar_frame_anotado(ts, 0.8)
+        if anotado is None:
+            return None
+        # respuesta legible en la pantalla del telefono
+        ancho = 640
+        if anotado.shape[1] > ancho:
+            escala = ancho / anotado.shape[1]
+            anotado = cv2.resize(
+                anotado, (ancho, max(1, round(anotado.shape[0] * escala))))
+        ok, buf = cv2.imencode(".jpg", anotado,
+                               [int(cv2.IMWRITE_JPEG_QUALITY), 82])
+        return buf.tobytes() if ok else None
 
     def _iniciar_hilo(self, cam):
         cam_id = cam.get("id")
@@ -987,6 +1105,9 @@ class VentanaPrincipal(FluentWindow):
         for hilo in list(self.hilos.values()):
             hilo.detener()
         self.hilos.clear()
+        for hilo in list(self.hilos_telefono.values()):
+            hilo.detener()
+        self.hilos_telefono.clear()
         self._limpiar_filas()
         self._tras_detener()
 
@@ -1162,8 +1283,8 @@ class VentanaPrincipal(FluentWindow):
             progreso, f"{progreso * seg_confirm:.1f} s / {seg_confirm:.1f} s")
 
     def _on_confirmada(self, cam_id, track_id, nombre, alumno_id, similitud):
-        if cam_id not in self.hilos:
-            return  # camara detenida: descartar senales en transito
+        if cam_id not in self.hilos and cam_id not in self.hilos_telefono:
+            return  # fuente detenida: descartar senales en transito
         # Un confirmado tiene prioridad máxima en el LCD.
         estado_lcd.actualizar_confirmado(nombre=nombre)
         self._actualizar_simulador_lcd()

@@ -27,6 +27,7 @@ import os
 import socket
 import ssl
 import threading
+import time
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -106,6 +107,7 @@ class _Handler(BaseHTTPRequestHandler):
     # Inyectado por ServidorWeb (callables), compartidos por todos los hilos:
     provedor_frame = None      # () -> np.ndarray | None (frame anotado BGR)
     provedor_estado = None     # () -> dict (salud de nodos/cámaras)
+    servidor = None            # ServidorWeb (registro de telefonos)
 
     def log_message(self, fmt, *args):  # silencioso: la consola ya tiene log
         pass
@@ -141,6 +143,7 @@ class _Handler(BaseHTTPRequestHandler):
     # -- rutas ---------------------------------------------------------------
     def do_GET(self):
         ruta = self.path.split("?", 1)[0]
+        params = self._params()
         try:
             if ruta == "/ping":
                 self._json({"ok": True, "ts": datetime.now().isoformat()})
@@ -151,7 +154,15 @@ class _Handler(BaseHTTPRequestHandler):
                             "alumnos": filas})
             elif ruta == "/api/status":
                 estado = self.provedor_estado() if self.provedor_estado else {}
+                estado["telefonos"] = self._telefonos_para_api()
                 self._json(estado)
+            elif ruta == "/api/telefonos":
+                self._json({"telefonos": self._telefonos_para_api()})
+            elif ruta == "/api/telefono/estado":
+                self._json(self._estado_telefono(params.get("tel", "")))
+            elif ruta == "/api/telefono/heartbeat":
+                # GET y POST: la pagina manda fetch sin method (GET)
+                self._telefono_heartbeat(params)
             elif ruta == "/stream":
                 self._stream_mjpeg()
             elif ruta == "/foto":
@@ -164,6 +175,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self.send_header("Content-Length", str(len(jpg)))
                 self.end_headers()
                 self.wfile.write(jpg)
+            elif ruta == "/telefono":
+                self._html(_PAGINA_TELEFONO)
             elif ruta == "/":
                 self._html(_PAGINA_VISOR)
             else:
@@ -177,6 +190,103 @@ class _Handler(BaseHTTPRequestHandler):
                 self._json({"error": "error interno"}, 500)
             except Exception:
                 pass
+
+    def do_POST(self):
+        ruta = self.path.split("?", 1)[0]
+        params = self._params()
+        try:
+            if ruta == "/api/telefono/frame":
+                self._telefono_frame(params)
+            elif ruta == "/api/telefono/heartbeat":
+                self._telefono_heartbeat(params)
+            else:
+                self._json({"error": "ruta desconocida"}, 404)
+        except (ConnectionError, BrokenPipeError, ssl.SSLError):
+            pass
+        except Exception:
+            import traceback
+            print(f"[WEB] error en POST {ruta}:\n{traceback.format_exc()}")
+            try:
+                self._json({"error": "error interno"}, 500)
+            except Exception:
+                pass
+
+    # -- telefonos ------------------------------------------------------------
+    def _params(self):
+        from urllib.parse import parse_qs
+        return {k: v[0] for k, v in
+                parse_qs(self.path.split("?", 1)[1] if "?" in self.path
+                         else "").items()}
+
+    def _telefono_registrar(self, tel_id, nombre, camara=""):
+        """Alta/actualizacion del telefono que se reporta (hilo servidor)."""
+        ahora = time.time()
+        with self.servidor._lock_tel:
+            reg = self.servidor.telefonos.get(tel_id)
+            if reg is None:
+                reg = {"nombre": "", "ip": self.client_address[0],
+                       "visto": ahora, "camara": camara, "estado": "libre"}
+                self.servidor.telefonos[tel_id] = reg
+            reg["visto"] = ahora
+            reg["ip"] = self.client_address[0]
+            if nombre:
+                reg["nombre"] = nombre
+            if camara:
+                reg["camara"] = camara
+            return dict(reg)
+
+    def _estado_telefono(self, tel_id):
+        with self.servidor._lock_tel:
+            reg = self.servidor.telefonos.get(tel_id)
+            if reg is None:
+                return {"estado": "libre", "conocido": False}
+            caido = (time.time() - reg["visto"]) > self.servidor.TIEMPO_TELEFONO_CAIDO
+            return {"estado": reg["estado"], "conocido": True, "caido": caido,
+                    "nombre": reg["nombre"]}
+
+    def _telefonos_para_api(self):
+        ahora = time.time()
+        with self.servidor._lock_tel:
+            return {tel: dict(reg,
+                              online=(ahora - reg["visto"])
+                              <= self.servidor.TIEMPO_TELEFONO_CAIDO)
+                    for tel, reg in self.servidor.telefonos.items()}
+
+    def _telefono_heartbeat(self, params):
+        tel_id = (params.get("tel") or "").strip()
+        if not tel_id:
+            self._json({"error": "falta tel"}, 400)
+            return
+        self._telefono_registrar(tel_id, params.get("nombre", ""),
+                                 params.get("camara", ""))
+        self._json(self._estado_telefono(tel_id))
+
+    def _telefono_frame(self, params):
+        """Foto subida por el telefono -> pipeline IA -> JPEG anotado."""
+        tel_id = (params.get("tel") or "").strip()
+        if not tel_id:
+            self._json({"error": "falta tel"}, 400)
+            return
+        try:
+            lon = int(self.headers.get("Content-Length", 0))
+        except ValueError:
+            lon = 0
+        if lon <= 0 or lon > 8_000_000:  # tope 8 MB por frame
+            self._json({"error": "cuerpo invalido"}, 400)
+            return
+        jpg = self.rfile.read(lon)
+        self._telefono_registrar(tel_id, params.get("nombre", ""),
+                                 params.get("camara", ""))
+        cb = self.servidor.al_frame_telefono
+        anotado = cb(tel_id, params.get("nombre", ""), jpg) if cb else None
+        if anotado is None:
+            self._json({"error": "procesamiento no disponible"}, 503)
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "image/jpeg")
+        self.send_header("Content-Length", str(len(anotado)))
+        self.end_headers()
+        self.wfile.write(anotado)
 
     def _stream_mjpeg(self):
         """MJPEG multipart: mismo formato que sirve la ESP32 en :81."""
@@ -209,9 +319,18 @@ class _Handler(BaseHTTPRequestHandler):
 class ServidorWeb:
     """Servidor HTTPS + mDNS en un hilo daemon. start() / detener()."""
 
-    def __init__(self, provedor_frame=None, provedor_estado=None):
+    TIEMPO_TELEFONO_CAIDO = 8.0  # s sin heartbeat -> aparece como caido
+
+    def __init__(self, provedor_frame=None, provedor_estado=None,
+                 al_frame_telefono=None):
         self.provedor_frame = provedor_frame
         self.provedor_estado = provedor_estado or (lambda: {})
+        # al_frame_telefono(tel_id, nombre, jpeg_bytes) -> jpeg anotado | None
+        self.al_frame_telefono = al_frame_telefono
+        # registro de telefonos conectados (protegido por _lock_tel):
+        #   tel_id -> {"nombre", "ip", "visto": ts, "camara", "estado"}
+        self.telefonos = {}
+        self._lock_tel = threading.Lock()
         self._server = None
         self._hilo = None
         self._zeroconf = None
@@ -230,6 +349,7 @@ class ServidorWeb:
                 staticmethod(self.provedor_frame) if self.provedor_frame else None)
             _Handler.provedor_estado = (
                 staticmethod(self.provedor_estado) if self.provedor_estado else None)
+            _Handler.servidor = self
             server = ThreadingHTTPServer(("0.0.0.0", PUERTO_HTTPS), _Handler)
             server.daemon_threads = True
             ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
@@ -381,5 +501,126 @@ async function refrescar() {
   } catch (e) {}
 }
 setInterval(refrescar, 5000); refrescar();
+</script></body></html>
+"""
+
+_PAGINA_TELEFONO = """<!DOCTYPE html>
+<html lang="es"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>Centinela — Cámara</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #101014; color: #e4e4e7;
+         font-family: system-ui, "Segoe UI", sans-serif;
+         display: flex; flex-direction: column; height: 100dvh; }
+  video { display: none; }
+  #vista { flex: 1; min-height: 0; display: flex; align-items: center;
+           justify-content: center; background: #0a0a0e; }
+  #vista img { max-width: 100%; max-height: 100%; }
+  #controles { padding: 10px 12px; display: flex; gap: 8px;
+               align-items: center; flex-wrap: wrap; }
+  button { padding: 10px 16px; border-radius: 10px; border: 1px solid #3f3f46;
+           background: #27272a; color: #e4e4e7; font-size: 14px; }
+  button.primario { background: #0e7490; border-color: #0e7490; }
+  input { padding: 9px 12px; border-radius: 10px; border: 1px solid #3f3f46;
+          background: #18181b; color: #e4e4e7; font-size: 14px; flex: 1;
+          min-width: 120px; }
+  #estado { font-size: 12px; color: #8b97a8; width: 100%; }
+  .oculto { display: none !important; }
+  body.bloqueado #controles { display: none; }
+  body.bloqueado { cursor: none; }
+</style></head><body>
+<div id="vista"><img id="foto" alt="Esperando cámara…"></div>
+<div id="controles">
+  <input id="nombre" placeholder="Tu nombre (opcional)" autocomplete="off">
+  <button id="btn_cam" class="primario">📷 Cámara</button>
+</div>
+<video id="video" autoplay playsinline muted></video>
+<script>
+const $ = id => document.getElementById(id);
+const video = $("video"), img = $("foto");
+let stream = null, camara = "environment";
+let tel = localStorage.getItem("centinela_tel");
+if (!tel) {
+  tel = (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()));
+  localStorage.setItem("centinela_tel", tel);
+}
+$("nombre").value = localStorage.getItem("centinela_tel_nombre") || "";
+$("nombre").addEventListener("change", () =>
+  localStorage.setItem("centinela_tel_nombre", $("nombre").value.trim()));
+
+const q = extra => "/api/telefono/" + extra + "?tel=" + encodeURIComponent(tel) +
+  "&nombre=" + encodeURIComponent($("nombre").value.trim()) +
+  "&camara=" + camara;
+
+async function encender(que = camara) {
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: que, width: { ideal: 1280 } }, audio: false });
+    video.srcObject = stream;
+    await video.play();
+    subir_frames();
+  } catch (e) {
+    $("estado").textContent = "Sin permiso de cámara: " + e.message;
+  }
+}
+
+$("btn_cam").onclick = () => {
+  camara = camara === "environment" ? "user" : "environment";
+  encender(camara);
+};
+
+const lienzo = document.createElement("canvas");
+const contexto = lienzo.getContext("2d");
+let ocupado = false;
+
+async function subir_frames() {
+  if (!stream || ocupado) return;
+  ocupado = true;
+  try {
+    const w = video.videoWidth, h = video.videoHeight;
+    if (w && h) {
+      const escala = Math.min(1, 640 / w);
+      lienzo.width = Math.round(w * escala);
+      lienzo.height = Math.round(h * escala);
+      contexto.drawImage(video, 0, 0, lienzo.width, lienzo.height);
+      const blob = await new Promise(r =>
+        lienzo.toBlob(r, "image/jpeg", 0.6));
+      if (blob) {
+        const r = await fetch(q("frame"), { method: "POST", body: blob });
+        if (r.ok) {
+          img.src = URL.createObjectURL(await r.blob());
+          URL.revokeObjectURL(img.src);
+        }
+      }
+    }
+  } catch (e) { /* red lenta: reintenta en el próximo ciclo */ }
+  ocupado = false;
+}
+
+setInterval(subir_frames, 330);            // ~3 fotos por segundo
+setInterval(() => fetch(q("heartbeat"), { method: "POST" }), 2000);
+
+function aplicar_estado(s) {
+  document.body.classList.toggle("bloqueado", s === "bloqueado");
+  $("controles").classList.toggle("oculto",
+    s === "bloqueado" || s === "controles_ocultos");
+  if (s === "bloqueado" && !document.fullscreenElement) {
+    document.documentElement.requestFullscreen?.().catch(() => {});
+  }
+}
+setInterval(async () => {
+  try {
+    const r = await (await fetch("/api/telefono/estado?tel=" +
+      encodeURIComponent(tel))).json();
+    if (r.conocido) aplicar_estado(r.estado);
+  } catch (e) {}
+}, 1000);
+
+$("estado").textContent = "Conectado. Si no ves imagen, acepta el permiso de cámara.";
+encender();
 </script></body></html>
 """
