@@ -325,6 +325,10 @@ class DialogoAlumno(MessageBoxBase):
         if not nombre:
             aviso(self, "Datos incompletos", "El nombre es obligatorio.")
             return
+        if not any(c.isalpha() for c in nombre):
+            aviso(self, "Datos incompletos",
+                  "El nombre debe tener al menos una letra (no solo símbolos).")
+            return
         inscripciones = self.inscripciones_elegidas()
         for _c, combo_curso, _s in self._filas_insc:
             if combo_curso.currentIndex() <= 0:

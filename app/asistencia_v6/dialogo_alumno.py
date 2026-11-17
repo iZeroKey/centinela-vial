@@ -210,6 +210,10 @@ class DialogoAlumno(QDialog):
         if not nombre:
             QMessageBox.warning(self, "Datos incompletos", "El nombre es obligatorio.")
             return
+        if not any(c.isalpha() for c in nombre):
+            QMessageBox.warning(self, "Datos incompletos",
+                                "El nombre debe tener al menos una letra (no solo símbolos).")
+            return
         curso = self.edit_curso.text().strip()
         grupo = self.edit_grupo.text().strip()
         apellidos = self.edit_apellidos.text().strip()
