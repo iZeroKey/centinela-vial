@@ -31,6 +31,7 @@ Señales:
 
 import os, sys, time, socket, urllib.request
 import threading
+import queue
 import cv2
 import numpy as np
 
@@ -63,7 +64,7 @@ class CamaraHilo(QThread):
     estado_camara = pyqtSignal(bool)
     error = pyqtSignal(str)
 
-    def __init__(self, fuente, referencias, umbral_global=0.70,
+    def __init__(self, fuente, referencias, umbral_global=0.75,
                  intervalo_segundos=0.1, confirm_seg=CONFIRM_SEG,
                  reconocer=True, modo_escaneo="uno"):
         super().__init__()
@@ -91,6 +92,21 @@ class CamaraHilo(QThread):
         self._t_inicio_fallo = None
         self._frames_consecutivos_fallidos = 0
 
+        # Desacoplar lectura del stream del procesamiento: el reconocimiento
+        # corre en un hilo aparte para no bloquear el bucle ni congelar el
+        # stream. Se procesa 1 de cada `procesar_cada_n` frames leidos.
+        self._procesando = False
+        self._worker = None
+        self._frame_count = 0
+        self.procesar_cada_n = 2
+
+        # Productor/consumidor: hilo lector llena la cola, bucle principal consume
+        self._frame_queue = queue.Queue(maxsize=2)
+        self._reader_thread = None
+        self._reader_stop = threading.Event()
+        self._ultimo_frame_raw = None  # ultimo frame leido (para preview sin bloqueo)
+        self._tcp_mode = False
+
     # ---------------- Referencias en caliente ----------------
     def set_referencias(self, nuevas):
         """Reemplaza las referencias aunque el hilo esté corriendo."""
@@ -114,81 +130,189 @@ class CamaraHilo(QThread):
         self._frames_consecutivos_fallidos = 0
         try:
             self._abrir()
+            # Arrancar hilo productor (lector)
+            self._reader_stop.clear()
+            self._reader_thread = threading.Thread(target=self._reader, daemon=True)
+            self._reader_thread.start()
+
             t_prev = time.time()
+            self._t_ultimo_log_med = 0.0
+            ultimo_frame_consumido = None
             while self._corriendo:
-                ok, frame = self._leer_frame()
-                if not ok:
-                    # Para streams MJPEG, un frame fallido no es fatal: seguimos
-                    # intentando. Ademas del contador de intentos hay un
-                    # presupuesto de tiempo: si cada reconexion falla por timeout
-                    # (servidor vivo pero sin servicio, p.ej. otro cliente
-                    # ocupando el stream) 30 conteos tardaria varios minutos; el
-                    # presupuesto acota el aviso a ~45 s.
-                    ahora_f = time.time()
-                    if self._t_inicio_fallo is None:
-                        self._t_inicio_fallo = ahora_f
-                    self._frames_consecutivos_fallidos += 1
-                    if (self._frames_consecutivos_fallidos > 30
-                            or ahora_f - self._t_inicio_fallo > 45.0):
-                        self.error.emit("No se reciben frames de la cámara (verificar URL y red)")
-                        break
-                    self.msleep(50)
+                # Consumir frame de la cola (sin bloquear)
+                frame = None
+                try:
+                    frame = self._frame_queue.get_nowait()
+                    ultimo_frame_consumido = frame
+                except queue.Empty:
+                    frame = ultimo_frame_consumido
+
+                if frame is None:
+                    self.msleep(30)
                     continue
-                self._frames_consecutivos_fallidos = 0
-                self._t_inicio_fallo = None
 
                 ahora = time.time()
                 dt = ahora - t_prev
                 t_prev = ahora
 
-                if self.reconocer and ahora - self._ultimo_tiempo >= self._intervalo_segundos():
+                self._frame_count += 1
+                if (self.reconocer and not self._procesando
+                        and self._frame_count % self.procesar_cada_n == 0
+                        and ahora - self._ultimo_tiempo >= self._intervalo_segundos()):
                     self._ultimo_tiempo = ahora
-                    t_proceso = time.time()
-                    self._procesar(frame, dt)
-                    t_proceso = time.time() - t_proceso
-                    if t_proceso > 1.0:
-                        print(f"[CAM] {time.strftime('%H:%M:%S')} _procesar tardo {t_proceso:.1f} s")
+                    self._procesando = True
+                    # Redimensionar para procesamiento (reduce CPU) si es grande
+                    if frame.shape[1] > 320:
+                        frame_proc = cv2.resize(frame, (320, 240))
+                    else:
+                        frame_proc = frame
+                    frame_copia = frame_proc.copy()
+                    self._worker = threading.Thread(
+                        target=self._worker_procesar,
+                        args=(frame_copia, dt), daemon=True)
+                    self._worker.start()
 
+                # Mientras se procesa, dibujar las ultimas anotaciones sobre el
+                # frame crudo para mantener el preview fluido sin parpadeo.
+                # Mostrar el ultimo frame anotado (congelado durante procesamiento)
+                # para que el recuadro no salte a una posicion vieja.
                 mostrar = self._ultimo_frame if self._ultimo_frame is not None else frame
-                self.frame_listo.emit(mostrar, list(self._ultimas_detecciones))
+
+                # Emitir preview solo 1 de cada 2 frames para reducir overhead
+                # de serializacion de arrays en las señales PyQt.
+                if self._frame_count % 3 == 0:
+                    self.frame_listo.emit(mostrar, list(self._ultimas_detecciones))
                 self.msleep(5)
         except Exception as e:
             self.error.emit(str(e))
         finally:
+            self._reader_stop.set()
+            if self._reader_thread is not None and self._reader_thread.is_alive():
+                self._reader_thread.join(timeout=5.0)
+            if self._worker is not None and self._worker.is_alive():
+                self._worker.join(timeout=5.0)
             self._liberar()
             self.estado_camara.emit(False)
 
     def _intervalo_segundos(self):
         return max(0.05, self.intervalo_segundos)
 
+    def _worker_procesar(self, frame, dt):
+        """Ejecuta _procesar en un hilo aparte para no bloquear el bucle."""
+        try:
+            self._procesar(frame, dt)
+        except Exception as e:
+            print(f"[CAM] error en procesamiento: {type(e).__name__}: {e}")
+        finally:
+            self._procesando = False
+
+    def _reader(self):
+        """Hilo productor: lee frames del stream y los pone en la cola."""
+        backoff = 1.0
+        while self._corriendo and not self._reader_stop.is_set():
+            t_lec = time.time()
+            try:
+                ok, frame = self._leer_frame()
+            except Exception as e:
+                print(f"[CAM] reader error: {type(e).__name__}: {e}")
+                ok, frame = False, None
+            t_lec = time.time() - t_lec
+            if ok and time.time() - getattr(self, "_t_ultimo_log_med", 0.0) >= 2.0:
+                self._t_ultimo_log_med = time.time()
+                print(f"[MED] lectura+decode={t_lec*1000:.0f} ms  procesando={self._procesando}")
+
+            if not ok or frame is None:
+                self._frames_consecutivos_fallidos += 1
+                ahora_f = time.time()
+                if self._t_inicio_fallo is None:
+                    self._t_inicio_fallo = ahora_f
+                if (self._frames_consecutivos_fallidos > 30
+                        or ahora_f - self._t_inicio_fallo > 45.0):
+                    self.error.emit("No se reciben frames de la camara (verificar URL y red)")
+                    break
+                espera = min(backoff, 8.0)
+                self._reader_stop.wait(espera)
+                backoff = min(backoff * 2, 8.0)
+                viva, _ = self._tras_fallo_lectura()
+                if not viva:
+                    continue
+                backoff = 1.0
+                continue
+
+            self._frames_consecutivos_fallidos = 0
+            self._t_inicio_fallo = None
+            backoff = 1.0
+            try:
+                self._frame_queue.put_nowait(frame)
+            except queue.Full:
+                try:
+                    self._frame_queue.get_nowait()
+                except queue.Empty:
+                    pass
+                try:
+                    self._frame_queue.put_nowait(frame)
+                except queue.Full:
+                    pass
+
+    def _dibujar(self, frame, detecciones):
+        """Dibuja las anotaciones (esquinas + nombre/sim) sobre frame in-place."""
+        for det in detecciones:
+            x1, y1, x2, y2 = [int(v) for v in det["caja"]]
+            m = 8
+            ax1, ay1, ax2, ay2 = x1 - m, y1 - m, x2 + m, y2 + m
+            L = max(18, (ax2 - ax1) // 5, (ay2 - ay1) // 5)
+            color = det.get("color", (0, 200, 0) if det.get("identificado") else (0, 0, 200))
+            thick = 3
+            cv2.line(frame, (ax1, ay1), (ax1 + L, ay1), color, thick)
+            cv2.line(frame, (ax1, ay1), (ax1, ay1 + L), color, thick)
+            cv2.line(frame, (ax2, ay1), (ax2 - L, ay1), color, thick)
+            cv2.line(frame, (ax2, ay1), (ax2, ay1 + L), color, thick)
+            cv2.line(frame, (ax1, ay2), (ax1 + L, ay2), color, thick)
+            cv2.line(frame, (ax1, ay2), (ax1, ay2 - L), color, thick)
+            cv2.line(frame, (ax2, ay2), (ax2 - L, ay2), color, thick)
+            cv2.line(frame, (ax2, ay2), (ax2, ay2 - L), color, thick)
+            cv2.putText(
+                frame,
+                f"{det['nombre']}  {det['sim']:.2f}",
+                (ax1, max(ay1 - 12, 24)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.65,
+                color,
+                2,
+            )
+
     def _es_url_http(self, fuente):
-        return isinstance(fuente, str) and fuente.lower().startswith(("http://", "https://"))
+        return isinstance(fuente, str) and fuente.lower().startswith(("http://", "https://", "tcp://"))
 
     def _abrir(self):
         fuente = self.fuente
         self._es_url = self._es_url_http(fuente)
 
         if self._es_url:
-            # Leer stream MJPEG por HTTP manualmente (cv2.VideoCapture no lo hace bien en Windows)
-            req = urllib.request.Request(
-                fuente,
-                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
-            )
-            # Abrimos la conexión con timeout de conexión; el socket se configurará
-            # con un timeout de lectura para no bloquear para siempre.
-            self._stream = urllib.request.urlopen(req, timeout=15)
-            # NOTA: a proposito NO se acorta el timeout de lectura del socket
-            # (el intento original era 0.5 s). Una lectura que vence por timeout
-            # sobre un BufferedReader queda "envenenada": TODAS las lecturas
-            # posteriores lanzan OSError("cannot read from timed out object"),
-            # aunque lleguen datos o incluso el cierre de conexion, y el except
-            # de _leer_frame_mjpeg lo enmascararia como reintento eterno sin
-            # emitir error. Se conserva el timeout (15 s) que urlopen fija al
-            # socket: ante un hipo de red bloquea y despues actua el except de
-            # _leer_frame_mjpeg (si el BufferedReader quedara envenenado por el
-            # vencimiento, la reconexion de _tras_fallo_lectura lo reemplaza).
-            # Leer y descartar los headers HTTP iniciales hasta el primer boundary
-            self._leer_hasta_boundary()
+            # Detectar si es stream TCP crudo (puerto 81 o scheme tcp)
+            from urllib.parse import urlparse
+            parsed = urlparse(fuente)
+            host = parsed.hostname
+            port = parsed.port
+            usar_tcp = (parsed.scheme == "tcp") or (port == 81) or (port is None and "81" in fuente)
+            if usar_tcp:
+                if port is None:
+                    port = 81
+                # Conexion TCP cruda
+                sock = socket.create_connection((host, port), timeout=5)
+                sock.settimeout(5)
+                self._stream = sock.makefile("rb")
+                self._sock = sock
+                self._tcp_mode = True
+            else:
+                # Leer stream MJPEG por HTTP manualmente
+                req = urllib.request.Request(
+                    fuente,
+                    headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
+                )
+                self._stream = urllib.request.urlopen(req, timeout=5)
+                self._tcp_mode = False
+                self._leer_hasta_boundary()
         else:
             # Cámara local (índice numérico)
             try:
@@ -211,6 +335,10 @@ class CamaraHilo(QThread):
             print(f"[CAM] {time.strftime('%H:%M:%S')} 3 reconexiones sin exito; se cuenta como fallo")
             self._intentos_reconexion = 0
             return False, None
+        # Backoff exponencial para no reconectar agresivamente
+        espera = min(2 ** (self._intentos_reconexion - 1), 8.0)
+        print(f"[CAM] {time.strftime('%H:%M:%S')} esperando {espera:.0f}s antes de reconectar...")
+        time.sleep(espera)
         # No se resetea el contador al conectar bien: resetear aqui permitiria
         # un bucle eterno con un servidor que acepta la conexion y la cierra
         # de inmediato (reconexiones siempre "exitosas" sin ningun frame). El
@@ -236,13 +364,23 @@ class CamaraHilo(QThread):
                 except Exception:
                     pass
                 self._stream = None
-            req = urllib.request.Request(
-                self.fuente,
-                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
-            )
-            self._stream = urllib.request.urlopen(req, timeout=5)
-            self._leer_hasta_boundary()
-            self._mjpeg_buf = b""
+            if getattr(self, "_tcp_mode", False):
+                from urllib.parse import urlparse
+                parsed = urlparse(self.fuente)
+                host = parsed.hostname
+                port = parsed.port or 81
+                sock = socket.create_connection((host, port), timeout=5)
+                sock.settimeout(5)
+                self._stream = sock.makefile("rb")
+                self._sock = sock
+            else:
+                req = urllib.request.Request(
+                    self.fuente,
+                    headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
+                )
+                self._stream = urllib.request.urlopen(req, timeout=5)
+                self._leer_hasta_boundary()
+                self._mjpeg_buf = b""
             print(f"[CAM] {time.strftime('%H:%M:%S')} stream reconectado")
             return True
         except Exception as e:
@@ -268,14 +406,60 @@ class CamaraHilo(QThread):
     def _leer_frame(self):
         """
         Devuelve (ok, frame_bgr).
+        Para URLs TCP lee [4 bytes len][JPEG].
         Para URLs HTTP lee el stream MJPEG frame por frame.
         Para cámaras locales usa cv2.VideoCapture.read().
         """
         if self._es_url:
+            if getattr(self, "_tcp_mode", False):
+                return self._leer_frame_tcp()
             return self._leer_frame_mjpeg()
         else:
             ok, frame = self._cap.read()
             return ok, frame
+
+    def _leer_frame_tcp(self):
+        """Lee un frame JPEG del stream TCP crudo: [4 bytes len][JPEG]."""
+        stream = self._stream
+        # Leer 4 bytes de longitud
+        hdr = b""
+        while len(hdr) < 4 and self._corriendo:
+            try:
+                chunk = stream.read(4 - len(hdr))
+            except (TimeoutError, OSError, ValueError, AttributeError) as e:
+                print(f"[CAM] tcp read hdr fallo: {type(e).__name__}: {e}")
+                return False, None
+            if not chunk:
+                print("[CAM] tcp stream cerro (EOF)")
+                return False, None
+            hdr += chunk
+        if len(hdr) < 4:
+            return False, None
+        lon = (hdr[0] << 24) | (hdr[1] << 16) | (hdr[2] << 8) | hdr[3]
+        if lon <= 0 or lon > 2_000_000:
+            print(f"[CAM] tcp longitud invalida: {lon}")
+            return False, None
+        # Leer lon bytes del JPEG
+        buf = b""
+        while len(buf) < lon and self._corriendo:
+            try:
+                chunk = stream.read(min(4096, lon - len(buf)))
+            except (TimeoutError, OSError, ValueError, AttributeError) as e:
+                print(f"[CAM] tcp read body fallo: {type(e).__name__}: {e}")
+                return False, None
+            if not chunk:
+                print("[CAM] tcp stream cerro (EOF) durante body")
+                return False, None
+            buf += chunk
+        if len(buf) < lon:
+            return False, None
+        arr = np.frombuffer(buf, dtype=np.uint8)
+        frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        if frame is not None:
+            self._intentos_reconexion = 0
+            return True, frame
+        print("[CAM] tcp decode fallo")
+        return False, None
 
     def _leer_frame_mjpeg(self):
         """Lee un frame JPEG del stream multipart de la cámara ESP32."""
@@ -292,7 +476,7 @@ class CamaraHilo(QThread):
         #     devuelve (False, None) y run() sera quien emita el error.
         while self._corriendo:
             try:
-                chunk = stream.read(4096)
+                chunk = stream.read(1024)
             except (TimeoutError, OSError, ValueError, AttributeError) as e:
                 # TimeoutError es subclase de OSError; se lista por claridad.
                 # Con el socket roto (timeout, RST, cierre abrupto) la conexion
@@ -360,6 +544,12 @@ class CamaraHilo(QThread):
             except Exception:
                 pass
             self._stream = None
+        if getattr(self, "_sock", None) is not None:
+            try:
+                self._sock.close()
+            except Exception:
+                pass
+            self._sock = None
 
     def _centro(self, caja):
         x1, y1, x2, y2 = caja
@@ -494,46 +684,20 @@ class CamaraHilo(QThread):
                     continue
                 del self._tracks[tid]
 
-        # Dibujar anotaciones en el frame y preparar lista de detecciones
+        # Preparar lista de detecciones (sin dibujar aun)
         detecciones = []
         for det in identificadas:
-            x1, y1, x2, y2 = [int(v) for v in det["caja"]]
-            # Overlay moderno: solo esquinas (corner brackets) con margen,
-            # en lugar del rectangulo completo. Mas limpio y menos invasivo.
-            m = 8
-            ax1, ay1, ax2, ay2 = x1 - m, y1 - m, x2 + m, y2 + m
-            L = max(18, (ax2 - ax1) // 5, (ay2 - ay1) // 5)
-            color = det["color"]
-            thick = 3
-            # superior izquierda
-            cv2.line(anotado, (ax1, ay1), (ax1 + L, ay1), color, thick)
-            cv2.line(anotado, (ax1, ay1), (ax1, ay1 + L), color, thick)
-            # superior derecha
-            cv2.line(anotado, (ax2, ay1), (ax2 - L, ay1), color, thick)
-            cv2.line(anotado, (ax2, ay1), (ax2, ay1 + L), color, thick)
-            # inferior izquierda
-            cv2.line(anotado, (ax1, ay2), (ax1 + L, ay2), color, thick)
-            cv2.line(anotado, (ax1, ay2), (ax1, ay2 - L), color, thick)
-            # inferior derecha
-            cv2.line(anotado, (ax2, ay2), (ax2 - L, ay2), color, thick)
-            cv2.line(anotado, (ax2, ay2), (ax2, ay2 - L), color, thick)
-            cv2.putText(
-                anotado,
-                f"{det['nombre']}  {det['sim']:.2f}",
-                (ax1, max(ay1 - 12, 24)),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.65,
-                color,
-                2,
-            )
             detecciones.append({
                 "nombre": det["nombre"],
                 "sim": det["sim"],
                 "caja": det["caja"],
                 "identificado": det["identificado"],
                 "alumno_id": det["alumno_id"],
+                "color": det["color"],
             })
 
+        # Dibujar anotaciones sobre el frame anotado
+        self._dibujar(anotado, detecciones)
         self._ultimo_frame = anotado
         self._ultimas_detecciones = detecciones
 
@@ -543,6 +707,11 @@ class CamaraHilo(QThread):
 
     def detener(self):
         self._corriendo = False
+        self._reader_stop.set()
+        if self._reader_thread is not None and self._reader_thread.is_alive():
+            self._reader_thread.join(timeout=5.0)
+        if self._worker is not None and self._worker.is_alive():
+            self._worker.join(timeout=5.0)
         self.wait(3000)
 
 

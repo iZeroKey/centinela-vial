@@ -31,7 +31,7 @@
 
 // ---------------- Configuración WiFi ----------------
 const char *WIFI_SSID = "wifiprueba";
-const char *WIFI_PASS = "erick12345";
+const char *WIFI_PASS = "prueba123";
 const char *NOMBRE_MDNS   = "centinela-lcd";   // http://centinela-lcd.local
 
 // IP fija opcional: pon USAR_IP_FIJA en true y ajusta los valores a tu red.

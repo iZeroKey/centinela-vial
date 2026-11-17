@@ -13,7 +13,7 @@
   "alumnos": [
     {
       "alumno_id": "E001",
-      "nombre": "Erick",
+      "nombre": "ERICK OBED",
       "foto_referencia": "referencia/E001.jpeg",
       "embedding": [
         -0.024862341582775116,
@@ -530,11 +530,21 @@
         0.05817647650837898
       ],
       "estado": "activo",
-      "fecha_registro": "2026-10-17T09:00:00-06:00"
+      "fecha_registro": "2026-10-17T09:00:00-06:00",
+      "apellidos": "FLORES RICRA",
+      "actualizado_en": "2026-11-12T23:37:49.521713",
+      "curso": "GESTION DE INTERNET DE LAS COSAS",
+      "seccion": "C1",
+      "inscripciones": [
+        {
+          "curso": "GESTION DE INTERNET DE LAS COSAS",
+          "seccion": "C1"
+        }
+      ]
     },
     {
       "alumno_id": "E002",
-      "nombre": "Rodrigo",
+      "nombre": "RODRIGO SEBASTIAN",
       "foto_referencia": "referencia/E002.jpg",
       "embedding": [
         0.037087902426719666,
@@ -1052,12 +1062,20 @@
       ],
       "estado": "activo",
       "fecha_registro": "2026-10-20T18:35:19.401810",
-      "curso": "",
-      "grupo": ""
+      "curso": "GESTION DE INTERNET DE LAS COSAS",
+      "apellidos": "TELLO MORENO",
+      "actualizado_en": "2026-11-12T23:37:49.521713",
+      "seccion": "C1",
+      "inscripciones": [
+        {
+          "curso": "GESTION DE INTERNET DE LAS COSAS",
+          "seccion": "C1"
+        }
+      ]
     },
     {
       "alumno_id": "E003",
-      "nombre": "Jose",
+      "nombre": "JOSE ARMANDO",
       "foto_referencia": "referencia/E003.jpeg",
       "embedding": [
         0.05172492936253548,
@@ -1574,11 +1592,21 @@
         0.019608039408922195
       ],
       "estado": "activo",
-      "fecha_registro": "2026-10-20T18:50:30.553466"
+      "fecha_registro": "2026-10-20T18:50:30.553466",
+      "apellidos": "CHACCA VELASQUEZ",
+      "actualizado_en": "2026-11-12T23:37:49.521713",
+      "curso": "GESTION DE INTERNET DE LAS COSAS",
+      "seccion": "C1",
+      "inscripciones": [
+        {
+          "curso": "GESTION DE INTERNET DE LAS COSAS",
+          "seccion": "C1"
+        }
+      ]
     },
     {
       "alumno_id": "E004",
-      "nombre": "Romulo",
+      "nombre": "ROMULO",
       "foto_referencia": "referencia/E004.jpeg",
       "embedding": [
         0.026624174788594246,
@@ -2095,11 +2123,21 @@
         0.005067028570920229
       ],
       "estado": "activo",
-      "fecha_registro": "2026-10-20T20:36:26.029701"
+      "fecha_registro": "2026-10-20T20:36:26.029701",
+      "apellidos": "TORIBIO ROJAS",
+      "actualizado_en": "2026-11-12T23:37:49.521713",
+      "curso": "GESTION DE INTERNET DE LAS COSAS",
+      "seccion": "C1",
+      "inscripciones": [
+        {
+          "curso": "GESTION DE INTERNET DE LAS COSAS",
+          "seccion": "C1"
+        }
+      ]
     },
     {
       "alumno_id": "E005",
-      "nombre": "Jhonatan Huamanís",
+      "nombre": "JHONATHAN DANNY",
       "foto_referencia": "referencia/E005.jpeg",
       "embedding": [
         0.06348603963851929,
@@ -2616,11 +2654,21 @@
         0.030556224286556244
       ],
       "estado": "activo",
-      "fecha_registro": "2026-10-20T20:38:21.944176"
+      "fecha_registro": "2026-10-20T20:38:21.944176",
+      "apellidos": "HUAMANI SANCHEZ",
+      "actualizado_en": "2026-11-12T23:37:49.521713",
+      "curso": "GESTION DE INTERNET DE LAS COSAS",
+      "seccion": "C1",
+      "inscripciones": [
+        {
+          "curso": "GESTION DE INTERNET DE LAS COSAS",
+          "seccion": "C1"
+        }
+      ]
     },
     {
       "alumno_id": "E006",
-      "nombre": "Nallely Serrato",
+      "nombre": "NAYELI LISET",
       "foto_referencia": "referencia/E006.jpeg",
       "embedding": [
         -0.03783401846885681,
@@ -3137,11 +3185,21 @@
         0.09764755517244339
       ],
       "estado": "activo",
-      "fecha_registro": "2026-10-20T20:47:39.683000"
+      "fecha_registro": "2026-10-20T20:47:39.683000",
+      "apellidos": "SERRATO VIDAL",
+      "actualizado_en": "2026-11-12T23:37:49.521713",
+      "curso": "GESTION DE INTERNET DE LAS COSAS",
+      "seccion": "C1",
+      "inscripciones": [
+        {
+          "curso": "GESTION DE INTERNET DE LAS COSAS",
+          "seccion": "C1"
+        }
+      ]
     },
     {
       "alumno_id": "E007",
-      "nombre": "Vilma Rodríguez",
+      "nombre": "VILMA ROSA",
       "foto_referencia": "referencia/E007.jpeg",
       "embedding": [
         0.018219321966171265,
@@ -3658,11 +3716,21 @@
         0.05119987204670906
       ],
       "estado": "activo",
-      "fecha_registro": "2026-10-20T20:48:25.885244"
+      "fecha_registro": "2026-10-20T20:48:25.885244",
+      "apellidos": "RODRIGUEZ FERMIN",
+      "actualizado_en": "2026-11-12T23:37:49.521713",
+      "curso": "GESTION DE INTERNET DE LAS COSAS",
+      "seccion": "C1",
+      "inscripciones": [
+        {
+          "curso": "GESTION DE INTERNET DE LAS COSAS",
+          "seccion": "C1"
+        }
+      ]
     },
     {
       "alumno_id": "E008",
-      "nombre": "Fred Conde",
+      "nombre": "FRED ROGER",
       "foto_referencia": "referencia/E008.jpeg",
       "embedding": [
         -0.020116018131375313,
@@ -4179,11 +4247,21 @@
         0.05385209992527962
       ],
       "estado": "activo",
-      "fecha_registro": "2026-10-20T20:48:53.272136"
+      "fecha_registro": "2026-10-20T20:48:53.272136",
+      "apellidos": "CONDE TOMAYLLA",
+      "actualizado_en": "2026-11-12T23:37:49.521713",
+      "curso": "GESTION DE INTERNET DE LAS COSAS",
+      "seccion": "C1",
+      "inscripciones": [
+        {
+          "curso": "GESTION DE INTERNET DE LAS COSAS",
+          "seccion": "C1"
+        }
+      ]
     },
     {
       "alumno_id": "E009",
-      "nombre": "Maryori Zeta",
+      "nombre": "MARJORI BRITCIA",
       "foto_referencia": "referencia/E009.jpeg",
       "embedding": [
         0.0750909298658371,
@@ -4700,7 +4778,17 @@
         0.10094653815031052
       ],
       "estado": "activo",
-      "fecha_registro": "2026-10-20T20:49:31.716042"
+      "fecha_registro": "2026-10-20T20:49:31.716042",
+      "apellidos": "ZETA ALVARADO",
+      "actualizado_en": "2026-11-12T23:37:49.521713",
+      "curso": "GESTION DE INTERNET DE LAS COSAS",
+      "seccion": "C1",
+      "inscripciones": [
+        {
+          "curso": "GESTION DE INTERNET DE LAS COSAS",
+          "seccion": "C1"
+        }
+      ]
     },
     {
       "alumno_id": "E010",
@@ -5221,11 +5309,20 @@
         0.016623221337795258
       ],
       "estado": "activo",
-      "fecha_registro": "2026-10-20T20:49:56.841171"
+      "fecha_registro": "2026-10-20T20:49:56.841171",
+      "curso": "GESTION DE INTERNET DE LAS COSAS",
+      "actualizado_en": "2026-11-12T23:37:49.521713",
+      "seccion": "C1",
+      "inscripciones": [
+        {
+          "curso": "GESTION DE INTERNET DE LAS COSAS",
+          "seccion": "C1"
+        }
+      ]
     },
     {
       "alumno_id": "E011",
-      "nombre": "Abigail Prya Ponte Solís",
+      "nombre": "ABIGAIL PRYA",
       "foto_referencia": "referencia/E011.jpeg",
       "embedding": [
         0.00018189463298767805,
@@ -5742,11 +5839,21 @@
         0.12040401995182037
       ],
       "estado": "activo",
-      "fecha_registro": "2026-10-20T20:50:31.818322"
+      "fecha_registro": "2026-10-20T20:50:31.818322",
+      "apellidos": "PONTE SOLIS",
+      "actualizado_en": "2026-11-12T23:37:49.521713",
+      "curso": "GESTION DE INTERNET DE LAS COSAS",
+      "seccion": "C1",
+      "inscripciones": [
+        {
+          "curso": "GESTION DE INTERNET DE LAS COSAS",
+          "seccion": "C1"
+        }
+      ]
     },
     {
       "alumno_id": "E012",
-      "nombre": "Fabian Dominguez",
+      "nombre": "LEONCIO FABIAN",
       "foto_referencia": "referencia/E012.jpeg",
       "embedding": [
         0.07226725667715073,
@@ -6263,7 +6370,17 @@
         0.07977943867444992
       ],
       "estado": "activo",
-      "fecha_registro": "2026-10-20T20:50:55.184104"
+      "fecha_registro": "2026-10-20T20:50:55.184104",
+      "apellidos": "DOMINGUEZ TEJADA",
+      "actualizado_en": "2026-11-12T23:37:49.521713",
+      "curso": "GESTION DE INTERNET DE LAS COSAS",
+      "seccion": "C1",
+      "inscripciones": [
+        {
+          "curso": "GESTION DE INTERNET DE LAS COSAS",
+          "seccion": "C1"
+        }
+      ]
     },
     {
       "alumno_id": "E013",
@@ -6784,11 +6901,20 @@
         0.028218885883688927
       ],
       "estado": "activo",
-      "fecha_registro": "2026-10-20T20:51:54.999931"
+      "fecha_registro": "2026-10-20T20:51:54.999931",
+      "curso": "GESTION DE INTERNET DE LAS COSAS",
+      "actualizado_en": "2026-11-12T23:37:49.521713",
+      "seccion": "C1",
+      "inscripciones": [
+        {
+          "curso": "GESTION DE INTERNET DE LAS COSAS",
+          "seccion": "C1"
+        }
+      ]
     },
     {
       "alumno_id": "E014",
-      "nombre": "Rubens Vidal",
+      "nombre": "RUBENS DAVID",
       "foto_referencia": "referencia/E014.jpeg",
       "embedding": [
         0.059965889900922775,
@@ -7305,11 +7431,21 @@
         0.07745325565338135
       ],
       "estado": "activo",
-      "fecha_registro": "2026-10-20T20:52:49.800133"
+      "fecha_registro": "2026-10-20T20:52:49.800133",
+      "apellidos": "VIDAL PITA",
+      "actualizado_en": "2026-11-12T23:37:49.521713",
+      "curso": "GESTION DE INTERNET DE LAS COSAS",
+      "seccion": "C1",
+      "inscripciones": [
+        {
+          "curso": "GESTION DE INTERNET DE LAS COSAS",
+          "seccion": "C1"
+        }
+      ]
     },
     {
       "alumno_id": "E015",
-      "nombre": "Daniel Días",
+      "nombre": "DANIEL FRANCISCO",
       "foto_referencia": "referencia/E015.jpeg",
       "embedding": [
         0.04794595390558243,
@@ -7826,7 +7962,17 @@
         0.040545929223299026
       ],
       "estado": "activo",
-      "fecha_registro": "2026-10-20T20:53:38.693703"
+      "fecha_registro": "2026-10-20T20:53:38.693703",
+      "apellidos": "DIAZ VILLAFUERTE",
+      "actualizado_en": "2026-11-12T23:37:49.521713",
+      "curso": "GESTION DE INTERNET DE LAS COSAS",
+      "seccion": "C1",
+      "inscripciones": [
+        {
+          "curso": "GESTION DE INTERNET DE LAS COSAS",
+          "seccion": "C1"
+        }
+      ]
     },
     {
       "alumno_id": "E016",
@@ -8347,11 +8493,20 @@
         0.06401965022087097
       ],
       "estado": "activo",
-      "fecha_registro": "2026-10-20T20:54:07.424448"
+      "fecha_registro": "2026-10-20T20:54:07.424448",
+      "curso": "GESTION DE INTERNET DE LAS COSAS",
+      "actualizado_en": "2026-11-12T23:37:49.521713",
+      "seccion": "C1",
+      "inscripciones": [
+        {
+          "curso": "GESTION DE INTERNET DE LAS COSAS",
+          "seccion": "C1"
+        }
+      ]
     },
     {
       "alumno_id": "E017",
-      "nombre": "Luis Antonio Quispe",
+      "nombre": "LUIS ANTONIO",
       "foto_referencia": "referencia/E017.jpeg",
       "embedding": [
         0.08078908920288086,
@@ -8868,11 +9023,21 @@
         0.02331455983221531
       ],
       "estado": "activo",
-      "fecha_registro": "2026-10-20T20:54:31.683532"
+      "fecha_registro": "2026-10-20T20:54:31.683532",
+      "apellidos": "QUISPE FERNANDEZ",
+      "actualizado_en": "2026-11-12T23:37:49.521713",
+      "curso": "GESTION DE INTERNET DE LAS COSAS",
+      "seccion": "C1",
+      "inscripciones": [
+        {
+          "curso": "GESTION DE INTERNET DE LAS COSAS",
+          "seccion": "C1"
+        }
+      ]
     },
     {
       "alumno_id": "E018",
-      "nombre": "Jesus Villegas",
+      "nombre": "JESUS ALEXANDER",
       "foto_referencia": "referencia/E018.jpeg",
       "embedding": [
         -0.031763944774866104,
@@ -9389,11 +9554,21 @@
         0.08163060992956161
       ],
       "estado": "activo",
-      "fecha_registro": "2026-10-20T20:55:00.851821"
+      "fecha_registro": "2026-10-20T20:55:00.851821",
+      "apellidos": "VILLEGAS NAVARRO",
+      "actualizado_en": "2026-11-12T23:37:49.521713",
+      "curso": "GESTION DE INTERNET DE LAS COSAS",
+      "seccion": "C1",
+      "inscripciones": [
+        {
+          "curso": "GESTION DE INTERNET DE LAS COSAS",
+          "seccion": "C1"
+        }
+      ]
     },
     {
       "alumno_id": "E019",
-      "nombre": "Marco Antonio Silva delgado",
+      "nombre": "MARCO ANTONIO",
       "foto_referencia": "referencia/E019.jpeg",
       "embedding": [
         0.028141574934124947,
@@ -9910,11 +10085,21 @@
         0.06019698455929756
       ],
       "estado": "activo",
-      "fecha_registro": "2026-10-20T20:55:21.946754"
+      "fecha_registro": "2026-10-20T20:55:21.946754",
+      "apellidos": "SILVA DELGADO",
+      "actualizado_en": "2026-11-12T23:37:49.521713",
+      "curso": "GESTION DE INTERNET DE LAS COSAS",
+      "seccion": "C1",
+      "inscripciones": [
+        {
+          "curso": "GESTION DE INTERNET DE LAS COSAS",
+          "seccion": "C1"
+        }
+      ]
     },
     {
       "alumno_id": "E020",
-      "nombre": "Sandro Cavero",
+      "nombre": "SANDRO LUIS",
       "foto_referencia": "referencia/E020.jpeg",
       "embedding": [
         -0.014409525319933891,
@@ -10431,11 +10616,21 @@
         0.13349367678165436
       ],
       "estado": "activo",
-      "fecha_registro": "2026-10-20T20:55:59.817949"
+      "fecha_registro": "2026-10-20T20:55:59.817949",
+      "apellidos": "CAVERO GOMERO",
+      "actualizado_en": "2026-11-12T23:37:49.521713",
+      "curso": "GESTION DE INTERNET DE LAS COSAS",
+      "seccion": "C1",
+      "inscripciones": [
+        {
+          "curso": "GESTION DE INTERNET DE LAS COSAS",
+          "seccion": "C1"
+        }
+      ]
     },
     {
       "alumno_id": "E021",
-      "nombre": "FRANS Dias",
+      "nombre": "FRANZ JHAMIR",
       "foto_referencia": "referencia/E021.jpeg",
       "embedding": [
         -0.0032836475875228643,
@@ -10952,11 +11147,21 @@
         0.021585451439023018
       ],
       "estado": "activo",
-      "fecha_registro": "2026-10-20T21:04:30.232930"
+      "fecha_registro": "2026-10-20T21:04:30.232930",
+      "apellidos": "DIAZ ASTO",
+      "actualizado_en": "2026-11-12T23:37:49.521713",
+      "curso": "GESTION DE INTERNET DE LAS COSAS",
+      "seccion": "C1",
+      "inscripciones": [
+        {
+          "curso": "GESTION DE INTERNET DE LAS COSAS",
+          "seccion": "C1"
+        }
+      ]
     },
     {
       "alumno_id": "E022",
-      "nombre": "Jhon Huaquisto",
+      "nombre": "JHON JEFFERSOON",
       "foto_referencia": "referencia/E022.jpeg",
       "embedding": [
         -0.008688176050782204,
@@ -11473,11 +11678,21 @@
         0.06533750891685486
       ],
       "estado": "activo",
-      "fecha_registro": "2026-10-20T21:04:30.368622"
+      "fecha_registro": "2026-10-20T21:04:30.368622",
+      "apellidos": "HUAQUISTO MAGUIÑA",
+      "actualizado_en": "2026-11-12T23:37:49.521713",
+      "curso": "GESTION DE INTERNET DE LAS COSAS",
+      "seccion": "C1",
+      "inscripciones": [
+        {
+          "curso": "GESTION DE INTERNET DE LAS COSAS",
+          "seccion": "C1"
+        }
+      ]
     },
     {
       "alumno_id": "E023",
-      "nombre": "Braulio Berrospi",
+      "nombre": "BRAYAN BRAULIO",
       "foto_referencia": "referencia/E023.jpeg",
       "embedding": [
         0.009459618479013443,
@@ -11994,11 +12209,21 @@
         0.01932954043149948
       ],
       "estado": "activo",
-      "fecha_registro": "2026-10-20T21:04:30.446950"
+      "fecha_registro": "2026-10-20T21:04:30.446950",
+      "apellidos": "BERROSPI CONZA",
+      "actualizado_en": "2026-11-12T23:37:49.521713",
+      "curso": "GESTION DE INTERNET DE LAS COSAS",
+      "seccion": "C1",
+      "inscripciones": [
+        {
+          "curso": "GESTION DE INTERNET DE LAS COSAS",
+          "seccion": "C1"
+        }
+      ]
     },
     {
       "alumno_id": "E024",
-      "nombre": "Deivid Ramírez",
+      "nombre": "DEIVID VICTOR",
       "foto_referencia": "referencia/E024.jpeg",
       "embedding": [
         -0.03696628659963608,
@@ -12515,11 +12740,21 @@
         0.0848216786980629
       ],
       "estado": "activo",
-      "fecha_registro": "2026-10-20T21:09:44.840161"
+      "fecha_registro": "2026-10-20T21:09:44.840161",
+      "apellidos": "RAMIREZ OROSCO",
+      "actualizado_en": "2026-11-12T23:37:49.521713",
+      "curso": "GESTION DE INTERNET DE LAS COSAS",
+      "seccion": "C1",
+      "inscripciones": [
+        {
+          "curso": "GESTION DE INTERNET DE LAS COSAS",
+          "seccion": "C1"
+        }
+      ]
     },
     {
       "alumno_id": "E025",
-      "nombre": "Hugo Anglas",
+      "nombre": "HUGO PAUL",
       "foto_referencia": "referencia/E025.jpeg",
       "embedding": [
         -0.023732390254735947,
@@ -13036,11 +13271,21 @@
         0.028167063370347023
       ],
       "estado": "activo",
-      "fecha_registro": "2026-10-20T21:09:44.957737"
+      "fecha_registro": "2026-10-20T21:09:44.957737",
+      "apellidos": "ANGLAS ALMEYDA",
+      "actualizado_en": "2026-11-12T23:37:49.521713",
+      "curso": "GESTION DE INTERNET DE LAS COSAS",
+      "seccion": "C1",
+      "inscripciones": [
+        {
+          "curso": "GESTION DE INTERNET DE LAS COSAS",
+          "seccion": "C1"
+        }
+      ]
     },
     {
       "alumno_id": "E026",
-      "nombre": "Edison Ramos",
+      "nombre": "EDISON JORDAN",
       "foto_referencia": "referencia/E026.jpeg",
       "embedding": [
         0.01315163541585207,
@@ -13557,11 +13802,21 @@
         0.07972963899374008
       ],
       "estado": "activo",
-      "fecha_registro": "2026-10-20T21:09:45.049596"
+      "fecha_registro": "2026-10-20T21:09:45.049596",
+      "apellidos": "RAMOS RENGIFO",
+      "actualizado_en": "2026-11-12T23:37:49.521713",
+      "curso": "GESTION DE INTERNET DE LAS COSAS",
+      "seccion": "C1",
+      "inscripciones": [
+        {
+          "curso": "GESTION DE INTERNET DE LAS COSAS",
+          "seccion": "C1"
+        }
+      ]
     },
     {
       "alumno_id": "E027",
-      "nombre": "Rayhan Bisconti",
+      "nombre": "RAYHAN ALBERTO",
       "foto_referencia": "referencia/E027.jpeg",
       "embedding": [
         0.045414987951517105,
@@ -14078,11 +14333,21 @@
         0.09085206687450409
       ],
       "estado": "activo",
-      "fecha_registro": "2026-10-20T21:09:45.137272"
+      "fecha_registro": "2026-10-20T21:09:45.137272",
+      "apellidos": "BISCONTI VASQUEZ",
+      "actualizado_en": "2026-11-12T23:37:49.521713",
+      "curso": "GESTION DE INTERNET DE LAS COSAS",
+      "seccion": "C1",
+      "inscripciones": [
+        {
+          "curso": "GESTION DE INTERNET DE LAS COSAS",
+          "seccion": "C1"
+        }
+      ]
     },
     {
       "alumno_id": "E028",
-      "nombre": "Julio Gonzalez",
+      "nombre": "JULIO ALESSANDRO ROHIT",
       "foto_referencia": "referencia/E028.jpeg",
       "embedding": [
         0.0777817890048027,
@@ -14599,11 +14864,21 @@
         0.03159290552139282
       ],
       "estado": "activo",
-      "fecha_registro": "2026-10-20T21:09:45.216737"
+      "fecha_registro": "2026-10-20T21:09:45.216737",
+      "apellidos": "GONZALES HEREDIA",
+      "actualizado_en": "2026-11-12T23:37:49.521713",
+      "curso": "GESTION DE INTERNET DE LAS COSAS",
+      "seccion": "C1",
+      "inscripciones": [
+        {
+          "curso": "GESTION DE INTERNET DE LAS COSAS",
+          "seccion": "C1"
+        }
+      ]
     },
     {
       "alumno_id": "E029",
-      "nombre": "Juan de Dios Suárez",
+      "nombre": "JUAN DE DIOS",
       "foto_referencia": "referencia/E029.jpeg",
       "embedding": [
         0.06434958428144455,
@@ -15120,11 +15395,21 @@
         0.00610761996358633
       ],
       "estado": "activo",
-      "fecha_registro": "2026-10-20T21:09:45.287892"
+      "fecha_registro": "2026-10-20T21:09:45.287892",
+      "apellidos": "SUAREZ FRANCO",
+      "actualizado_en": "2026-11-12T23:37:49.521713",
+      "curso": "GESTION DE INTERNET DE LAS COSAS",
+      "seccion": "C1",
+      "inscripciones": [
+        {
+          "curso": "GESTION DE INTERNET DE LAS COSAS",
+          "seccion": "C1"
+        }
+      ]
     },
     {
       "alumno_id": "E030",
-      "nombre": "Sebastian Ramos",
+      "nombre": "SEBASTIAN ANTONIO",
       "foto_referencia": "referencia/E030.jpeg",
       "embedding": [
         0.07693241536617279,
@@ -15641,11 +15926,21 @@
         0.048227425664663315
       ],
       "estado": "activo",
-      "fecha_registro": "2026-10-20T21:09:45.381509"
+      "fecha_registro": "2026-10-20T21:09:45.381509",
+      "apellidos": "RAMOS SANCHEZ",
+      "actualizado_en": "2026-11-12T23:37:49.521713",
+      "curso": "GESTION DE INTERNET DE LAS COSAS",
+      "seccion": "C1",
+      "inscripciones": [
+        {
+          "curso": "GESTION DE INTERNET DE LAS COSAS",
+          "seccion": "C1"
+        }
+      ]
     },
     {
       "alumno_id": "E031",
-      "nombre": "Daniel Noa",
+      "nombre": "DANIEL ALEXANDER",
       "foto_referencia": "referencia/E031.jpeg",
       "embedding": [
         0.016448883339762688,
@@ -16162,11 +16457,21 @@
         0.06507401913404465
       ],
       "estado": "activo",
-      "fecha_registro": "2026-10-20T21:09:45.472790"
+      "fecha_registro": "2026-10-20T21:09:45.472790",
+      "apellidos": "NOA ESCRIBA",
+      "actualizado_en": "2026-11-12T23:37:49.521713",
+      "curso": "GESTION DE INTERNET DE LAS COSAS",
+      "seccion": "C1",
+      "inscripciones": [
+        {
+          "curso": "GESTION DE INTERNET DE LAS COSAS",
+          "seccion": "C1"
+        }
+      ]
     },
     {
       "alumno_id": "E032",
-      "nombre": "Jarek Arpe",
+      "nombre": "JAREK ALEJANDRO",
       "foto_referencia": "referencia/E032.jpeg",
       "embedding": [
         0.02083013579249382,
@@ -16683,11 +16988,21 @@
         0.03499741107225418
       ],
       "estado": "activo",
-      "fecha_registro": "2026-10-20T21:09:45.560084"
+      "fecha_registro": "2026-10-20T21:09:45.560084",
+      "apellidos": "ARPE GUIZADO",
+      "actualizado_en": "2026-11-12T23:37:49.521713",
+      "curso": "GESTION DE INTERNET DE LAS COSAS",
+      "seccion": "C1",
+      "inscripciones": [
+        {
+          "curso": "GESTION DE INTERNET DE LAS COSAS",
+          "seccion": "C1"
+        }
+      ]
     },
     {
       "alumno_id": "E033",
-      "nombre": "Rosber Fernandez",
+      "nombre": "ROSBER ANTAIR",
       "foto_referencia": "referencia/E033.jpeg",
       "embedding": [
         0.06250323355197906,
@@ -17204,11 +17519,21 @@
         0.041858501732349396
       ],
       "estado": "activo",
-      "fecha_registro": "2026-10-20T21:09:45.691964"
+      "fecha_registro": "2026-10-20T21:09:45.691964",
+      "apellidos": "FERNANDEZ GARCIA",
+      "actualizado_en": "2026-11-12T23:37:49.521713",
+      "curso": "GESTION DE INTERNET DE LAS COSAS",
+      "seccion": "C1",
+      "inscripciones": [
+        {
+          "curso": "GESTION DE INTERNET DE LAS COSAS",
+          "seccion": "C1"
+        }
+      ]
     },
     {
       "alumno_id": "E034",
-      "nombre": "Paolo Cardenas",
+      "nombre": "GALTIER PAOLO",
       "foto_referencia": "referencia/E034.jpeg",
       "embedding": [
         0.04763048142194748,
@@ -17725,11 +18050,21 @@
         0.08392922580242157
       ],
       "estado": "activo",
-      "fecha_registro": "2026-10-20T21:09:45.824575"
+      "fecha_registro": "2026-10-20T21:09:45.824575",
+      "apellidos": "CARDENAS RAMOS",
+      "actualizado_en": "2026-11-12T23:37:49.521713",
+      "curso": "GESTION DE INTERNET DE LAS COSAS",
+      "seccion": "C1",
+      "inscripciones": [
+        {
+          "curso": "GESTION DE INTERNET DE LAS COSAS",
+          "seccion": "C1"
+        }
+      ]
     },
     {
       "alumno_id": "E035",
-      "nombre": "Erickson Pimentel",
+      "nombre": "ERICKSON LEONARDO",
       "foto_referencia": "referencia/E035.jpeg",
       "embedding": [
         -0.004428605083376169,
@@ -18246,11 +18581,21 @@
         0.055071767419576645
       ],
       "estado": "activo",
-      "fecha_registro": "2026-10-20T21:09:45.968799"
+      "fecha_registro": "2026-10-20T21:09:45.968799",
+      "apellidos": "PIMENTEL HUANACHIN",
+      "actualizado_en": "2026-11-12T23:37:49.521713",
+      "curso": "GESTION DE INTERNET DE LAS COSAS",
+      "seccion": "C1",
+      "inscripciones": [
+        {
+          "curso": "GESTION DE INTERNET DE LAS COSAS",
+          "seccion": "C1"
+        }
+      ]
     },
     {
       "alumno_id": "E036",
-      "nombre": "Luis Gil",
+      "nombre": "LUIS ALFONZO",
       "foto_referencia": "referencia/E036.jpeg",
       "embedding": [
         0.0065472181886434555,
@@ -18767,11 +19112,21 @@
         0.007210557349026203
       ],
       "estado": "activo",
-      "fecha_registro": "2026-10-20T21:11:30.391409"
+      "fecha_registro": "2026-10-20T21:11:30.391409",
+      "apellidos": "GIL MALDONADO",
+      "actualizado_en": "2026-11-12T23:37:49.521713",
+      "curso": "GESTION DE INTERNET DE LAS COSAS",
+      "seccion": "C1",
+      "inscripciones": [
+        {
+          "curso": "GESTION DE INTERNET DE LAS COSAS",
+          "seccion": "C1"
+        }
+      ]
     },
     {
       "alumno_id": "E037",
-      "nombre": "Johan Popi",
+      "nombre": "JOHAN CHARLES",
       "foto_referencia": "referencia/E037.jpeg",
       "embedding": [
         -0.017442556098103523,
@@ -19288,11 +19643,21 @@
         0.06067252531647682
       ],
       "estado": "activo",
-      "fecha_registro": "2026-10-20T21:11:30.468540"
+      "fecha_registro": "2026-10-20T21:11:30.468540",
+      "apellidos": "POPI SALAZAR",
+      "actualizado_en": "2026-11-12T23:37:49.521713",
+      "curso": "GESTION DE INTERNET DE LAS COSAS",
+      "seccion": "C1",
+      "inscripciones": [
+        {
+          "curso": "GESTION DE INTERNET DE LAS COSAS",
+          "seccion": "C1"
+        }
+      ]
     },
     {
       "alumno_id": "E038",
-      "nombre": "Jean Piere Vivanco",
+      "nombre": "JEAN PIERE JESUS",
       "foto_referencia": "referencia/E038.jpeg",
       "embedding": [
         0.07214142382144928,
@@ -19809,11 +20174,21 @@
         0.04875407740473747
       ],
       "estado": "activo",
-      "fecha_registro": "2026-10-20T21:11:30.552076"
+      "fecha_registro": "2026-10-20T21:11:30.552076",
+      "apellidos": "VIVANCO JANAMPA",
+      "actualizado_en": "2026-11-12T23:37:49.521713",
+      "curso": "GESTION DE INTERNET DE LAS COSAS",
+      "seccion": "C1",
+      "inscripciones": [
+        {
+          "curso": "GESTION DE INTERNET DE LAS COSAS",
+          "seccion": "C1"
+        }
+      ]
     },
     {
       "alumno_id": "E039",
-      "nombre": "Luis Moreano",
+      "nombre": "LUIS ANDERSON",
       "foto_referencia": "referencia/E039.jpeg",
       "embedding": [
         -0.006485574413090944,
@@ -20330,11 +20705,21 @@
         0.06842182576656342
       ],
       "estado": "activo",
-      "fecha_registro": "2026-10-20T21:11:30.653036"
+      "fecha_registro": "2026-10-20T21:11:30.653036",
+      "apellidos": "MOREANO TITO",
+      "actualizado_en": "2026-11-12T23:37:49.521713",
+      "curso": "GESTION DE INTERNET DE LAS COSAS",
+      "seccion": "C1",
+      "inscripciones": [
+        {
+          "curso": "GESTION DE INTERNET DE LAS COSAS",
+          "seccion": "C1"
+        }
+      ]
     },
     {
       "alumno_id": "E040",
-      "nombre": "Joel Guerra",
+      "nombre": "JOEL JORDANOFT",
       "foto_referencia": "referencia/E040.jpeg",
       "embedding": [
         0.011053177528083324,
@@ -20851,13 +21236,22 @@
         0.01671004295349121
       ],
       "estado": "activo",
-      "fecha_registro": "2026-10-20T21:11:30.739505"
+      "fecha_registro": "2026-10-20T21:11:30.739505",
+      "apellidos": "GUERRA VERGARAY",
+      "actualizado_en": "2026-11-12T23:37:49.521713",
+      "curso": "GESTION DE INTERNET DE LAS COSAS",
+      "seccion": "C1",
+      "inscripciones": [
+        {
+          "curso": "GESTION DE INTERNET DE LAS COSAS",
+          "seccion": "C1"
+        }
+      ]
     },
     {
       "alumno_id": "E041",
-      "nombre": "Orlando Vera Piñas",
-      "curso": "",
-      "grupo": "",
+      "nombre": "ORLANDO",
+      "curso": "GESTION DE INTERNET DE LAS COSAS",
       "foto_referencia": "referencia/E041.jpg",
       "embedding": [
         -0.04283308610320091,
@@ -21374,7 +21768,16 @@
         0.07008428126573563
       ],
       "estado": "activo",
-      "fecha_registro": "2026-10-27T14:41:52.419779"
+      "fecha_registro": "2026-10-27T14:41:52.419779",
+      "apellidos": "VERA PIÑAS",
+      "actualizado_en": "2026-11-12T23:37:49.521713",
+      "seccion": "C1",
+      "inscripciones": [
+        {
+          "curso": "GESTION DE INTERNET DE LAS COSAS",
+          "seccion": "C1"
+        }
+      ]
     }
   ]
 }
