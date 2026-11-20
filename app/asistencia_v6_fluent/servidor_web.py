@@ -636,7 +636,7 @@ _PAGINA_TELEFONO = """<!DOCTYPE html>
   video { display: none; }
   #vista { flex: 1; min-height: 0; display: flex; align-items: center;
            justify-content: center; background: #0a0a0e; }
-  #vista img { max-width: 100%; max-height: 100%; }
+  #vista img { width: 100%; height: 100%; object-fit: contain; }
   #controles { padding: 10px 12px; display: flex; gap: 8px;
                align-items: center; flex-wrap: wrap; }
   button { padding: 10px 16px; border-radius: 10px; border: 1px solid #3f3f46;
@@ -655,7 +655,14 @@ _PAGINA_TELEFONO = """<!DOCTYPE html>
 <div id="vista"><img id="foto" alt="Esperando cámara…"></div>
 <div id="controles">
   <input id="nombre" placeholder="Tu nombre (opcional)" autocomplete="off">
+  <select id="resolucion" style="padding:9px 12px;border-radius:10px;border:1px solid #3f3f46;background:#18181b;color:#e4e4e7;font-size:14px;">
+    <option value="0">Resolución original</option>
+    <option value="640">640 px</option>
+    <option value="1280" selected>1280 px</option>
+    <option value="1920">1920 px</option>
+  </select>
   <button id="btn_cam" class="primario">📷 Cámara</button>
+  <button id="btn_full" class="secundario">Pantalla completa</button>
   <div id="estado"></div>
   <div id="ip">Si centinela.local no resuelve: <code id="ip-url">cargando…</code></div>
 </div>
@@ -705,7 +712,16 @@ async function encender(que = camara) {
 
 $("btn_cam").onclick = () => {
   camara = camara === "environment" ? "user" : "environment";
+  $("btn_cam").textContent = (camara === "environment" ? "📷 Cámara trasera" : "📷 Cámara frontal");
   encender(camara);
+
+$("btn_full").onclick = () => {
+  if (document.fullscreenElement) {
+    document.exitFullscreen().catch(() => {});
+  } else {
+    document.documentElement.requestFullscreen().catch(() => {});
+  }
+};
 };
 
 const lienzo = document.createElement("canvas");
@@ -720,12 +736,13 @@ async function subir_frames() {
   try {
     const w = video.videoWidth, h = video.videoHeight;
     if (w && h) {
-      const escala = Math.min(1, 640 / w);
+      const objetivo = parseInt($("resolucion").value, 10) || 0;
+      const escala = objetivo > 0 ? Math.min(1, objetivo / w) : 1;
       lienzo.width = Math.round(w * escala);
       lienzo.height = Math.round(h * escala);
       contexto.drawImage(video, 0, 0, lienzo.width, lienzo.height);
       const blob = await new Promise(r =>
-        lienzo.toBlob(r, "image/jpeg", 0.6));
+        lienzo.toBlob(r, "image/jpeg", 0.8));
       if (blob) {
         const r = await fetch(q("frame"), { method: "POST", body: blob });
         if (r.ok) {
@@ -741,7 +758,7 @@ async function subir_frames() {
   ocupado = false;
 }
 
-setInterval(subir_frames, 330);            // ~3 fotos por segundo
+setInterval(subir_frames, 500);            // ~2 fotos por segundo (mas estable)
 setInterval(() => fetch(q("heartbeat"), { method: "POST" }), 2000);
 
 function aplicar_estado(s) {

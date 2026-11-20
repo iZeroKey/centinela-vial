@@ -29,6 +29,8 @@ import urllib.parse
 import urllib.request
 
 from estado_lcd import obtener_estado_lcd, obtener_filas_lcd
+import config as config_app
+from lcd_animacion import obtener_filas_animadas
 
 # Opener sin proxy: en Windows urllib lee el proxy del sistema y puede
 # desviar o retrasar las peticiones a la red local.
@@ -46,7 +48,7 @@ def _fila(texto):
 
 def construir_parametros():
     """Arma (estado, fila_1, fila_2) a partir del estado actual de estado_lcd."""
-    fila_1, fila_2 = obtener_filas_lcd()
+    fila_1, fila_2 = obtener_filas_animadas()
     return obtener_estado_lcd(), _fila(fila_1), _fila(fila_2)
 
 

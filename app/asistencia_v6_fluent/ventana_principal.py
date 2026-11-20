@@ -23,6 +23,7 @@ import numpy as np
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QRect, QRectF, QEvent
 from PyQt6.QtGui import (QImage, QPixmap, QFont, QColor, QIcon, QShortcut, QKeySequence,
                          QPainter, QPen, QBrush, QPainterPath)
+from PyQt6.QtSvg import QSvgRenderer
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QBoxLayout,
     QLabel, QFrame, QGroupBox, QHeaderView, QSplitter,
@@ -383,6 +384,7 @@ class VentanaPrincipal(FluentWindow):
         self._enlace_wifi = None
         self._lcd_track_prioritario = None
         self._lcd_area_prioritaria = 0.0
+        self._lcd_alumno_confirmado = None
         self._track_a_alumno = {}
         self._alumno_tracks = {}
         self._trabajo_recarga = None
@@ -645,25 +647,16 @@ class VentanaPrincipal(FluentWindow):
             for i, cam in enumerate(activas):
                 cam_id = cam.get("id")
                 grupo = HeaderCardWidget()
-                grupo.setTitle(cam.get("nombre") or str(cam_id))
+                curso_cam = str(cam.get("curso", "") or "").strip()
+                nombre_cam = cam.get("nombre") or str(cam_id)
+                grupo.setTitle(f"{nombre_cam} - {curso_cam}" if curso_cam else nombre_cam)
                 grupo.viewLayout.setDirection(QBoxLayout.Direction.TopToBottom)
                 lbl_video = QLabel("Sin señal")
                 lbl_video.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                lbl_video.setMinimumSize(460, 360)
+                lbl_video.setMinimumSize(640, 360)
                 lbl_video.setStyleSheet(ESTILO_VIDEO)
-                lbl_estado = QLabel("Cámara: detenida")
-                self._estilo_estado(lbl_estado, False)
-                lbl_estado.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 grupo.viewLayout.addWidget(lbl_video, 1)
-                grupo.viewLayout.addWidget(lbl_estado, 0)
-                # curso individual de la camara (informativo, config)
-                curso_cam = str(cam.get("curso", "") or "").strip()
-                if curso_cam:
-                    lbl_curso = CaptionLabel(f"Curso: {curso_cam}")
-                    lbl_curso.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                    grupo.viewLayout.addWidget(lbl_curso, 0)
                 self.labels_video[cam_id] = lbl_video
-                self.labels_estado_cam[cam_id] = lbl_estado
                 grid.addWidget(grupo, i // cols, i % cols)
             for c in range(cols):
                 grid.setColumnStretch(c, 1)
@@ -1086,6 +1079,8 @@ class VentanaPrincipal(FluentWindow):
                 intervalo_segundos=0.1,
                 confirm_seg=float(asist.get("segundos_confirmacion", 3.0)),
                 modo_escaneo=str(asist.get("modo_escaneo", "uno")),
+                procesar_cada_n=int(asist.get("procesar_cada_n", 1)),
+                recorte_aspecto="Original",
             )
             nuevo.cara_confirmada.connect(
                 lambda tid, n, a, s, caja_, cid=tel_id:
@@ -1123,7 +1118,7 @@ class VentanaPrincipal(FluentWindow):
         ts = time.time()
         if not hilo.recibir_frame_telefono(frame):
             return None
-        anotado = hilo.esperar_frame_anotado(ts, 0.8)
+        anotado = hilo.esperar_frame_anotado(ts, 1.5)
         if anotado is None:
             return None
         # respuesta legible en la pantalla del telefono
@@ -1149,6 +1144,8 @@ class VentanaPrincipal(FluentWindow):
                 intervalo_segundos=float(cam.get("intervalo_proceso", 0.1)),
                 confirm_seg=float(asist.get("segundos_confirmacion", 3.0)),
                 modo_escaneo=str(asist.get("modo_escaneo", "uno")),
+                procesar_cada_n=int(asist.get("procesar_cada_n", 1)),
+                recorte_aspecto=str(cam.get("recorte_aspecto", "Original")),
             )
         except Exception as e:
             self.mostrar_toast(
@@ -1251,32 +1248,6 @@ class VentanaPrincipal(FluentWindow):
         pix = qimg_scaled(qimg, lbl)
         pix = _pixmap_redondeado(pix, RADIO_VIDEO)
 
-        # Overlay moderno (UI-side, no toca la captura): borde + chip "EN VIVO"
-        painter = QPainter(pix)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor("#232d3a"))
-        pen.setWidth(2)
-        painter.setPen(pen)
-        painter.drawRoundedRect(pix.rect().adjusted(1, 1, -1, -1), RADIO_VIDEO, RADIO_VIDEO)
-
-        chip_text = "EN VIVO"
-        font = QFont("Segoe UI", 9, QFont.Weight.Bold)
-        painter.setFont(font)
-        fm = painter.fontMetrics()
-        tw = fm.horizontalAdvance(chip_text) + 20
-        th = fm.height() + 8
-        rx = pix.width() - tw - 14
-        ry = 14
-        painter.setBrush(QBrush(QColor("#12261f")))
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawRoundedRect(rx, ry, tw, th, 8, 8)
-        # punto de estado
-        painter.setBrush(QBrush(QColor("#34d399")))
-        painter.drawEllipse(rx + 8, ry + (th - 6) // 2, 6, 6)
-        painter.setPen(QColor("#34d399"))
-        painter.drawText(rx + 18, ry + fm.ascent() + 4, chip_text)
-        painter.end()
-
         lbl.setPixmap(pix)
 
     def _on_estado_cam(self, cam_id, activa):
@@ -1320,11 +1291,21 @@ class VentanaPrincipal(FluentWindow):
             or (cam_id, track_id) == self._lcd_track_prioritario
             or area > self._lcd_area_prioritaria * 1.1
         )
-        if es_prioritario:
+        # Si el alumno ya fue confirmado y sigue presente, mantener el OK en el
+        # LCD en vez de volver a mostrar el progreso (100%).
+        ya_confirmado = (
+            alumno_id is not None
+            and alumno_id == self._lcd_alumno_confirmado
+        )
+        if es_prioritario and not ya_confirmado:
             estado_lcd.actualizar_procesamiento(nombre=nombre, progreso=progreso)
             self._actualizar_simulador_lcd()
             self._lcd_track_prioritario = (cam_id, track_id)
             self._lcd_area_prioritaria = area
+            self._lcd_alumno_confirmado = None
+        elif es_prioritario and ya_confirmado:
+            self._lcd_track_prioritario = (cam_id, track_id)
+            self._lcd_area_prioritaria = float("inf")
 
         self.lbl_sin_rostros.hide()
 
@@ -1354,6 +1335,7 @@ class VentanaPrincipal(FluentWindow):
         self._actualizar_simulador_lcd()
         self._lcd_track_prioritario = (cam_id, track_id)
         self._lcd_area_prioritaria = float("inf")
+        self._lcd_alumno_confirmado = alumno_id if alumno_id else None
         if alumno_id:
             key = ("alumno", alumno_id)
         else:
@@ -1424,6 +1406,7 @@ class VentanaPrincipal(FluentWindow):
                 if self._lcd_track_prioritario == (cam_id, track_id):
                     self._lcd_track_prioritario = None
                     self._lcd_area_prioritaria = 0.0
+                    self._lcd_alumno_confirmado = None
                 return
             self._alumno_tracks.pop(alumno_id, None)
             key = ("alumno", alumno_id)
@@ -1433,6 +1416,7 @@ class VentanaPrincipal(FluentWindow):
         if self._lcd_track_prioritario == (cam_id, track_id):
             self._lcd_track_prioritario = None
             self._lcd_area_prioritaria = 0.0
+            self._lcd_alumno_confirmado = None
 
         if key in self.filas_progreso:
             fila = self.filas_progreso.pop(key)
@@ -1850,8 +1834,10 @@ def gestor_np(emb_lista):
 
 def qimg_scaled(qimg, label):
     pix = QPixmap.fromImage(qimg)
+    size = label.size()
+    # Mantener proporcion original (sin recorte forzado).
     return pix.scaled(
-        label.size(),
+        size,
         Qt.AspectRatioMode.KeepAspectRatio,
         Qt.TransformationMode.SmoothTransformation,
     )
@@ -1874,18 +1860,52 @@ def _pixmap_redondeado(pix, radio):
 
 
 def _app_icono():
-    """Icono de la ventana (del repo raiz: favicon.svg)."""
+    """Icono de la ventana (del repo raiz: favicon.svg), renderizado a varias
+    resoluciones para que la barra de tareas de Windows lo muestre bien."""
     ruta = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                         "..", "..", "favicon.svg")
-    return QIcon(ruta)
+    icono = QIcon()
+    if os.path.isfile(ruta):
+        renderer = QSvgRenderer(ruta)
+        for size in (16, 20, 24, 32, 40, 48, 64, 128, 256):
+            pix = QPixmap(size, size)
+            pix.fill(Qt.GlobalColor.transparent)
+            painter = QPainter(pix)
+            renderer.render(painter)
+            painter.end()
+            icono.addPixmap(pix)
+    if icono.isNull():
+        icono = QIcon(ruta)
+    return icono
 
 
 def main():
+    try:
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            "Centinela.Control.V6")
+    except Exception:
+        pass
     app = QApplication(sys.argv)
     app.setFont(QFont("Segoe UI", 10))
-    app.setWindowIcon(_app_icono())
+    icono = _app_icono()
+    app.setWindowIcon(icono)
     ventana = VentanaPrincipal()
+    ventana.setWindowIcon(icono)
+    # Tamaño ajustado a la pantalla (aprox. 2/3) y centrado
+    try:
+        pantalla = app.primaryScreen()
+        geom = pantalla.availableGeometry()
+        ancho = max(900, int(geom.width() * 2 / 3))
+        alto = max(600, int(geom.height() * 2 / 3))
+        ventana.resize(ancho, alto)
+        ventana.move(geom.x() + (geom.width() - ancho) // 2,
+                     geom.y() + (geom.height() - alto) // 2)
+    except Exception:
+        pass
     ventana.show()
+    ventana.setWindowIcon(icono)
+    app.setWindowIcon(icono)
     sys.exit(app.exec())
 
 

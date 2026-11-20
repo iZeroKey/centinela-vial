@@ -28,6 +28,14 @@ CAMARA_DEFAULT = {
 
 DEFAULTS = {
     "host_lcd": "",
+    "lcd_animacion": {
+        "activa": True,
+        "velocidad": 0.6,
+        "estilo_barra": "bloques",
+        "marquesina": True,
+        "iconos_ascii": True,
+        "destello_confirmado": True,
+    },
     "camaras": [dict(CAMARA_DEFAULT)],
     "cursos": [],            # [{"nombre": X, "secciones": ["C1", ...]}]
     "horarios": [],          # franjas horarias por curso+seccion (ver horarios_*)
@@ -38,6 +46,7 @@ DEFAULTS = {
         "umbral_lcd_nombre": 0.30,
         "duracion_resultado_lcd": 3.0,
         "modo_escaneo": "uno",   # "uno" = solo el rostro mas grande | "varios" = todos
+        "procesar_cada_n": 1,     # procesar 1 de cada N frames (fluidez vs reconocimiento)
         "tolerancia_tardanza_min": 5,   # minutos de gracia tras el inicio
         "aplicar_horarios": False,      # 4B: solo registrar dentro de la franja
     },

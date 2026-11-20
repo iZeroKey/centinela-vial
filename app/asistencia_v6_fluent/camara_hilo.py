@@ -78,7 +78,8 @@ class CamaraHilo(QThread):
 
     def __init__(self, fuente, referencias, umbral_global=0.75,
                  intervalo_segundos=0.1, confirm_seg=CONFIRM_SEG,
-                 reconocer=True, modo_escaneo="uno"):
+                 reconocer=True, modo_escaneo="uno",
+                 procesar_cada_n=1, recorte_aspecto="Original"):
         super().__init__()
         self.fuente = fuente
         self._lock_ref = threading.Lock()
@@ -99,6 +100,9 @@ class CamaraHilo(QThread):
 
         self._ultimo_frame = None
         self._ultimas_detecciones = []
+        self._tracker = None
+        self._tracker_box = None
+        self._tracker_ok = False
         self._mjpeg_buf = b""
         self._intentos_reconexion = 0
         self._t_inicio_fallo = None
@@ -110,7 +114,8 @@ class CamaraHilo(QThread):
         self._procesando = False
         self._worker = None
         self._frame_count = 0
-        self.procesar_cada_n = 2
+        self.procesar_cada_n = max(1, int(procesar_cada_n or 1))
+        self.recorte_aspecto = str(recorte_aspecto or "Original")
 
         # Productor/consumidor: hilo lector llena la cola, bucle principal consume
         self._frame_queue = queue.Queue(maxsize=2)
@@ -180,12 +185,9 @@ class CamaraHilo(QThread):
                         and ahora - self._ultimo_tiempo >= self._intervalo_segundos()):
                     self._ultimo_tiempo = ahora
                     self._procesando = True
-                    # Redimensionar para procesamiento (reduce CPU) si es grande
-                    if frame.shape[1] > 320:
-                        frame_proc = cv2.resize(frame, (320, 240))
-                    else:
-                        frame_proc = frame
-                    frame_copia = frame_proc.copy()
+                    # Procesar sobre el frame original para no degradar la
+                    # calidad del video mostrado (sin redimensionado).
+                    frame_copia = frame.copy()
                     self._worker = threading.Thread(
                         target=self._worker_procesar,
                         args=(frame_copia, dt), daemon=True)
@@ -199,10 +201,34 @@ class CamaraHilo(QThread):
 
                 # Emitir preview solo 1 de cada 2 frames para reducir overhead
                 # de serializacion de arrays en las señales PyQt.
-                if self._frame_count % 3 == 0:
-                    mostrar, _d = self._preparar_display(mostrar, [])
-                    self.frame_listo.emit(mostrar, list(self._ultimas_detecciones))
-                self.msleep(5)
+                mostrar, _d = self._preparar_display(frame, [])
+                dets = list(self._ultimas_detecciones)
+                # Actualizar tracker para suavizar el recuadro entre detecciones.
+                if self._tracker is not None and self._tracker_ok and dets:
+                    try:
+                        ok, box = self._tracker.update(frame)
+                        if ok:
+                            x, y, w, h = [int(v) for v in box]
+                            fh, fw = frame.shape[:2]
+                            mh, mw = mostrar.shape[:2]
+                            sx = mw / float(fw)
+                            sy = mh / float(fh)
+                            rx, ry = int(x * sx), int(y * sy)
+                            rw, rh = int(w * sx), int(h * sy)
+                            # Reutilizar el estilo original con la caja suavizada.
+                            dets = [dict(d) for d in dets]
+                            dets[0]["caja"] = (rx, ry, rx + rw, ry + rh)
+                        else:
+                            self._tracker_ok = False
+                    except Exception:
+                        self._tracker_ok = False
+                if dets:
+                    try:
+                        self._dibujar(mostrar, dets)
+                    except Exception:
+                        pass
+                self.frame_listo.emit(mostrar, dets)
+                self.msleep(1)
         except Exception as e:
             self.error.emit(str(e))
         finally:
@@ -292,29 +318,57 @@ class CamaraHilo(QThread):
         self._tamano_display = (ancho, alto) if ancho > 1 and alto > 1 else None
 
     def _preparar_display(self, frame, detecciones):
-        """Escala el frame (y sus cajas) a la resolucion de visualizacion."""
+        """Recorta por aspecto (si aplica) y escala a la resolucion de visualizacion."""
+        frame = frame.copy()
+        dets = [dict(d) for d in (detecciones or [])]
+
+        # Recorte por relacion de aspecto (sin pixeles, solo ratio).
+        aspecto = str(getattr(self, "recorte_aspecto", "Original") or "Original")
+        if aspecto and aspecto.lower() != "original":
+            try:
+                aw, ah = aspecto.split(":")
+                ratio = float(aw) / float(ah)
+            except (ValueError, ZeroDivisionError):
+                ratio = None
+            if ratio and ratio > 0:
+                h, w = frame.shape[:2]
+                if w / h > ratio:
+                    nuevo_w = int(h * ratio)
+                    x0 = (w - nuevo_w) // 2
+                    frame = frame[:, x0:x0 + nuevo_w]
+                    for d in dets:
+                        x1, y1, x2, y2 = d["caja"]
+                        d["caja"] = (x1 - x0, y1, x2 - x0, y2)
+                else:
+                    nuevo_h = int(w / ratio)
+                    y0 = (h - nuevo_h) // 2
+                    frame = frame[y0:y0 + nuevo_h, :]
+                    for d in dets:
+                        x1, y1, x2, y2 = d["caja"]
+                        d["caja"] = (x1, y1 - y0, x2, y2 - y0)
+
         tam = getattr(self, "_tamano_display", None)
         if not tam:
-            return frame, detecciones
+            return frame, dets
         ancho_d, alto_d = tam[0], tam[1]
         if ancho_d <= 0 or alto_d <= 0:
-            return frame, detecciones
+            return frame, dets
         alto_f, ancho_f = frame.shape[:2]
         escala = min(ancho_d / ancho_f, alto_d / alto_f)
         if escala <= 0:
-            return frame, detecciones
+            return frame, dets
         tw, th = max(1, round(ancho_f * escala)), max(1, round(alto_f * escala))
-        if tw == ancho_f and th == alto_f:
-            return frame, detecciones
+        if tw == ancho_f and th == alto_f and not dets:
+            return frame, dets
         mostrar = cv2.resize(frame, (tw, th), interpolation=cv2.INTER_LINEAR)
         f = escala
-        dets = []
-        for det in detecciones:
+        dets2 = []
+        for det in dets:
             x1, y1, x2, y2 = det["caja"]
             d = dict(det)
             d["caja"] = (x1 * f, y1 * f, x2 * f, y2 * f)
-            dets.append(d)
-        return mostrar, dets
+            dets2.append(d)
+        return mostrar, dets2
 
     # ---------------- Overlay (dibujado a resolucion de display) ----------
     def _factor_metrica(self, frame):
@@ -643,7 +697,22 @@ class CamaraHilo(QThread):
         return ((c1[0] - c2[0]) ** 2 + (c1[1] - c2[1]) ** 2) ** 0.5
 
     def _procesar(self, frame, dt):
-        resultados = pipeline_embeddings(frame, thr=0.5)
+        # Redimensionar para procesamiento (mas rapido) sin degradar el video.
+        orig_h, orig_w = frame.shape[:2]
+        escala = 1.0
+        if orig_w > 640:
+            escala = 640.0 / orig_w
+            frame_proc = cv2.resize(frame, (int(orig_w * escala), int(orig_h * escala)))
+        else:
+            frame_proc = frame
+        resultados = pipeline_embeddings(frame_proc, thr=0.5)
+        if getattr(self, "_es_telefono", False):
+            print(f"[TEL] frame={frame.shape} detecciones={len(resultados)}")
+        # Reescalar cajas a la resolucion original.
+        if escala != 1.0:
+            for r in resultados:
+                c = r["caja"]
+                r["caja"] = tuple(int(v / escala) for v in c)
         # Modo "uno": solo procesar la cara mas grande (mayor area).
         if self.modo_escaneo == "uno" and len(resultados) > 1:
             resultados = [max(resultados, key=lambda r: (
@@ -801,6 +870,21 @@ class CamaraHilo(QThread):
 
         # El overlay se dibuja a resolucion de visualizacion: el frame se
         # escala a la caja del QLabel de la UI y las cajas lo acompanan.
+        # Inicializar tracker con la primera deteccion (coords originales).
+        if detecciones:
+            try:
+                caja = detecciones[0]["caja"]
+                x1, y1, x2, y2 = [int(v) for v in caja]
+                self._tracker = cv2.TrackerKCF_create()
+                self._tracker.init(frame, (x1, y1, x2 - x1, y2 - y1))
+                self._tracker_ok = True
+            except Exception:
+                self._tracker = None
+                self._tracker_ok = False
+        else:
+            self._tracker = None
+            self._tracker_ok = False
+
         mostrar, detecciones = self._preparar_display(anotado, detecciones)
         self._dibujar(mostrar, detecciones)
         self._ultimo_frame = mostrar

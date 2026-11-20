@@ -36,6 +36,7 @@ class TarjetaTelefono(CardWidget):
     def __init__(self, tel_id, padre=None):
         super().__init__(padre)
         self.tel_id = tel_id
+        self.padre = padre
         self.setFixedHeight(96)
 
         h = QHBoxLayout(self)

@@ -100,6 +100,12 @@ class DialogoCamara(MessageBoxBase):
         self.spin_intervalo.setValue(float(self._camara.get("intervalo_proceso", 0.1)))
         self.spin_intervalo.setFixedWidth(120)
 
+        self.combo_aspecto = ComboBox()
+        self.combo_aspecto.addItems(["Original", "16:9", "4:3", "1:1", "21:9"])
+        aspecto_actual = str(self._camara.get("recorte_aspecto", "Original") or "Original")
+        idx_a = self.combo_aspecto.findText(aspecto_actual)
+        self.combo_aspecto.setCurrentIndex(idx_a if idx_a >= 0 else 0)
+
         def fila(etiqueta, widget):
             h = QHBoxLayout()
             l = CaptionLabel(etiqueta)
@@ -113,6 +119,7 @@ class DialogoCamara(MessageBoxBase):
         self.viewLayout.addLayout(fila("Fuente:", contenedor_fuente))
         self.viewLayout.addLayout(fila("Curso:", self.combo_curso))
         self.viewLayout.addLayout(fila("Intervalo:", self.spin_intervalo))
+        self.viewLayout.addLayout(fila("Recorte:", self.combo_aspecto))
 
         fila_activa = QHBoxLayout()
         lbl_activa = CaptionLabel("Cámara activa (aparece en Vigilancia)")
@@ -221,6 +228,7 @@ class DialogoCamara(MessageBoxBase):
             "curso": curso,
             "activa": self.chk_activa.isChecked(),
             "intervalo_proceso": float(self.spin_intervalo.value()),
+            "recorte_aspecto": self.combo_aspecto.currentText(),
         }
 
 
@@ -473,6 +481,11 @@ class PanelConfiguracion(QWidget):
         modo_actual = asist.get("modo_escaneo", "uno")
         self.combo_modo.setCurrentIndex(0 if modo_actual == "uno" else 1)
 
+        self.spin_procesar = SpinBox()
+        self.spin_procesar.setRange(1, 10)
+        self.spin_procesar.setSuffix(" frames")
+        self.spin_procesar.setValue(int(asist.get("procesar_cada_n", 1)))
+
         grupo = SettingCardGroup("Asistencia — parámetros de reconocimiento")
         grupo.addSettingCard(self._tarjeta_control(
             FIcon.FILTER, "Umbral de similitud", "0.10 – 0.99", self.spin_umbral))
@@ -485,6 +498,9 @@ class PanelConfiguracion(QWidget):
         grupo.addSettingCard(self._tarjeta_control(
             FIcon.SYNC, "Modo de escaneo", "uno = prioriza el rostro mayor",
             self.combo_modo, ancho=280))
+        grupo.addSettingCard(self._tarjeta_control(
+            FIcon.SYNC, "Procesar 1 de cada N frames",
+            "fluidez vs reconocimiento", self.spin_procesar))
 
         self.btn_guardar = PrimaryPushSettingCard(
             "Guardar parámetros", FIcon.SAVE, "Aplicar cambios",
@@ -510,6 +526,7 @@ class PanelConfiguracion(QWidget):
             "umbral_lcd_nombre": float(self.cfg.get("asistencia", {}).get("umbral_lcd_nombre", 0.30)),
             "duracion_resultado_lcd": float(self.cfg.get("asistencia", {}).get("duracion_resultado_lcd", 3.0)),
             "modo_escaneo": "uno" if self.combo_modo.currentIndex() == 0 else "varios",
+            "procesar_cada_n": int(self.spin_procesar.value()),
             "tolerancia_tardanza_min": int(self.spin_tolerancia.value()),
             "aplicar_horarios": bool(self.cfg.get("asistencia", {}).get("aplicar_horarios", False)),
         }
