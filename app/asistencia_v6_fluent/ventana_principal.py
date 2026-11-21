@@ -28,14 +28,14 @@ from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QBoxLayout,
     QLabel, QFrame, QGroupBox, QHeaderView, QSplitter,
     QDateEdit, QGridLayout, QGraphicsOpacityEffect, QTableWidgetItem,
-    QFileDialog,
+    QFileDialog, QSizePolicy,
 )
 from qfluentwidgets import (
     FluentWindow, setTheme, setThemeColor, Theme, isDarkTheme, FluentIcon as FIcon,
-    PushButton, PrimaryPushButton, LineEdit, ComboBox, SpinBox, DoubleSpinBox,
+    PushButton, PrimaryPushButton, LineEdit, SearchLineEdit, ComboBox, SpinBox, DoubleSpinBox,
     CheckBox, TableWidget, CardWidget, ElevatedCardWidget, HeaderCardWidget, TitleLabel, SubtitleLabel, BodyLabel,
-    CaptionLabel, ScrollArea, SmoothScrollArea, ProgressBar, FlowLayout,
-    InfoBar, InfoBarPosition, SwitchButton,
+    CaptionLabel, ScrollArea, SmoothScrollArea, ProgressBar,
+    InfoBar, InfoBarPosition, SwitchButton, IconWidget, NavigationItemPosition,
 )
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -251,21 +251,24 @@ class TarjetaAlumno(CardWidget):
 
         nombre = str(alumno.get("nombre", "") or "").strip()
         apellidos = str(alumno.get("apellidos", "") or "").strip()
-        self.nombre_completo = " ".join(x for x in (nombre, apellidos) if x) or "Sin nombre"
+        if apellidos and nombre:
+            self.nombre_completo = f"{apellidos}, {nombre}"
+        else:
+            self.nombre_completo = apellidos or nombre or "Sin nombre"
 
         insc = [i for i in (alumno.get("inscripciones") or [])
                 if isinstance(i, dict) and str(i.get("curso", "") or "").strip()]
         meta = " · ".join(
-            "·".join(x for x in (str(i.get("curso", "") or "").strip(),
-                                 str(i.get("seccion", "") or "").strip()) if x)
+            " · ".join(x for x in (str(i.get("curso", "") or "").strip(),
+                                   str(i.get("seccion", "") or "").strip()) if x)
             for i in insc)
         if alumno.get("estado") == "inactivo":
             meta = "Inactivo" + (f" · {meta}" if meta else "")
-        self.texto_meta = meta or "Sin datos"
+        self.texto_meta = meta or "Sin curso asignado"
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 10, 12, 10)
-        layout.setSpacing(4)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(6)
         layout.addStretch(1)
 
         self.lbl_foto = QLabel()
@@ -275,12 +278,12 @@ class TarjetaAlumno(CardWidget):
         self.lbl_nombre = BodyLabel()
         self.lbl_nombre.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lbl_nombre.setWordWrap(False)
-        layout.addWidget(self.lbl_nombre)
+        layout.addWidget(self.lbl_nombre, 0, Qt.AlignmentFlag.AlignHCenter)
 
         self.lbl_meta = CaptionLabel()
         self.lbl_meta.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lbl_meta.setWordWrap(False)
-        layout.addWidget(self.lbl_meta)
+        layout.addWidget(self.lbl_meta, 0, Qt.AlignmentFlag.AlignHCenter)
         layout.addStretch(1)
 
         self.set_ancho(int(ancho), inicial=True)
@@ -291,7 +294,7 @@ class TarjetaAlumno(CardWidget):
 
     @classmethod
     def tam_alto(cls, avatar):
-        return avatar + 70
+        return avatar + 76
 
     def set_ancho(self, ancho, inicial=False):
         """Redimensiona la tarjeta y regenera avatar/texto elidido."""
@@ -304,11 +307,16 @@ class TarjetaAlumno(CardWidget):
         self.setFixedSize(ancho, self.alto)
         self.lbl_foto.setFixedSize(avatar, avatar)
         self.lbl_foto.setPixmap(self._avatar_pixmap(self.alumno, avatar))
+        max_txt = max(80, ancho - 24)
+        self.lbl_nombre.setFixedWidth(max_txt)
+        self.lbl_meta.setFixedWidth(max_txt)
         fm = self.lbl_nombre.fontMetrics()
         self.lbl_nombre.setText(fm.elidedText(
-            self.nombre_completo, Qt.TextElideMode.ElideRight, ancho - 28))
+            self.nombre_completo, Qt.TextElideMode.ElideRight, max_txt))
         self.lbl_nombre.setToolTip(self.nombre_completo)
-        self.lbl_meta.setText(self.texto_meta)
+        fm_meta = self.lbl_meta.fontMetrics()
+        self.lbl_meta.setText(fm_meta.elidedText(
+            self.texto_meta, Qt.TextElideMode.ElideRight, max_txt))
         self.lbl_meta.setToolTip(self.texto_meta)
 
     def _avatar_pixmap(self, alumno, size):
@@ -474,15 +482,20 @@ class VentanaPrincipal(FluentWindow):
 
         self.addSubInterface(self.tab_vigilancia, FIcon.VIDEO, "Vigilancia")
         self.addSubInterface(self.tab_historial, FIcon.HISTORY, "Historial")
-        self.addSubInterface(self.panel_clases, FIcon.CALENDAR, "Clases")
+        self.navigationInterface.addSeparator()
         self.addSubInterface(self.tab_alumnos, FIcon.PEOPLE, "Alumnos")
-        self.addSubInterface(self.tab_dispositivos, FIcon.PHONE, "Dispositivos")
-        self.addSubInterface(self.panel_config, FIcon.SETTING, "Configuración")
+        self.addSubInterface(self.panel_clases, FIcon.CALENDAR, "Cursos y horarios")
+        self.addSubInterface(
+            self.tab_dispositivos, FIcon.PHONE, "Dispositivos",
+            position=NavigationItemPosition.BOTTOM)
+        self.addSubInterface(
+            self.panel_config, FIcon.SETTING, "Configuración",
+            position=NavigationItemPosition.BOTTOM)
 
         self.stackedWidget.currentChanged.connect(self._on_page_changed)
 
         self.mostrar_toast(
-            "Listo. Configure las cámaras en Configuración e inicie la vigilancia.")
+            "Listo. Inicia la vigilancia o ajusta tus cámaras en Configuración.")
 
     def closeEvent(self, event):
         self._detener_camaras()
@@ -531,8 +544,8 @@ class VentanaPrincipal(FluentWindow):
     def _construir_tab_vigilancia(self):
         tab = QWidget()
         layout = QVBoxLayout(tab)
-        layout.setContentsMargins(4, 4, 4, 4)
-        layout.setSpacing(12)
+        layout.setContentsMargins(16, 12, 16, 16)
+        layout.setSpacing(14)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
 
@@ -547,24 +560,28 @@ class VentanaPrincipal(FluentWindow):
 
         # Derecha: controles y rostros en verificación
         panel_derecho = QWidget()
+        panel_derecho.setMinimumWidth(340)
+        panel_derecho.setMaximumWidth(460)
         layout_derecho = QVBoxLayout(panel_derecho)
-        layout_derecho.setContentsMargins(8, 0, 0, 0)
-        layout_derecho.setSpacing(12)
+        layout_derecho.setContentsMargins(10, 0, 0, 0)
+        layout_derecho.setSpacing(14)
 
         grupo_controles = HeaderCardWidget()
         grupo_controles.setTitle("Control")
         grupo_controles.viewLayout.setDirection(QBoxLayout.Direction.TopToBottom)
         layout_controles = grupo_controles.viewLayout
         layout_controles.setSpacing(10)
-        layout_controles.setContentsMargins(14, 6, 14, 12)
+        layout_controles.setContentsMargins(14, 10, 14, 14)
 
         self.btn_iniciar = PushButton("Iniciar cámaras")
         self.btn_iniciar.setObjectName("exito")
+        self.btn_iniciar.setMinimumHeight(34)
         self.btn_iniciar.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_iniciar.clicked.connect(self._iniciar_camaras)
 
         self.btn_detener = PushButton("Detener todas")
         self.btn_detener.setObjectName("peligro")
+        self.btn_detener.setMinimumHeight(34)
         self.btn_detener.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_detener.setEnabled(False)
         self.btn_detener.clicked.connect(self._detener_camaras)
@@ -575,12 +592,14 @@ class VentanaPrincipal(FluentWindow):
         fila_botones.addWidget(self.btn_detener, 1)
         layout_controles.addLayout(fila_botones)
 
-        self.lbl_estado = QLabel("Cámaras: detenidas")
+        self.lbl_estado = QLabel("En espera")
         self._estilo_estado(self.lbl_estado, False)
         layout_controles.addWidget(self.lbl_estado)
 
-        self.btn_recargar = PushButton("Recargar alumnos (embeddings faltantes)")
+        self.btn_recargar = PushButton("Recargar embeddings")
         self.btn_recargar.setObjectName("secundario")
+        self.btn_recargar.setMinimumHeight(34)
+        self.btn_recargar.setToolTip("Calcula vectores faciales faltantes para los alumnos activos")
         self.btn_recargar.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_recargar.clicked.connect(self._recargar_alumnos)
         layout_controles.addWidget(self.btn_recargar)
@@ -594,11 +613,14 @@ class VentanaPrincipal(FluentWindow):
         grupo_progreso.setTitle("Verificando rostros")
         grupo_progreso.viewLayout.setDirection(QBoxLayout.Direction.TopToBottom)
         layout_progreso = grupo_progreso.viewLayout
-        layout_progreso.setContentsMargins(8, 12, 8, 8)
-        layout_progreso.setSpacing(8)
+        layout_progreso.setContentsMargins(12, 10, 12, 12)
+        layout_progreso.setSpacing(10)
 
-        self.lbl_sin_rostros = QLabel("Sin rostros detectados")
-        self.lbl_sin_rostros.setStyleSheet("color:#a5a5a5; font-size: 13px; background: transparent; border: none;")
+        self.lbl_sin_rostros = QLabel("Sin rostros en pantalla")
+        self.lbl_sin_rostros.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_sin_rostros.setStyleSheet(
+            "color: #8b97a8; font-size: 13px; background: transparent;"
+            " border: none; padding: 24px 12px;")
         layout_progreso.addWidget(self.lbl_sin_rostros)
 
         self.scroll_rostros_area = ScrollArea()
@@ -618,7 +640,9 @@ class VentanaPrincipal(FluentWindow):
         layout_derecho.addWidget(grupo_progreso, stretch=1)
 
         splitter.addWidget(panel_derecho)
-        splitter.setSizes([950, 550])
+        splitter.setSizes([860, 380])
+        splitter.setStretchFactor(0, 3)
+        splitter.setStretchFactor(1, 1)
         layout.addWidget(splitter)
 
         return tab
@@ -627,21 +651,31 @@ class VentanaPrincipal(FluentWindow):
         """Crea un panel de video por cada cámara activa del config."""
         contenedor = QWidget()
         grid = QGridLayout(contenedor)
-        grid.setContentsMargins(2, 2, 2, 2)
-        grid.setSpacing(12)
+        grid.setContentsMargins(4, 4, 4, 4)
+        grid.setSpacing(16)
 
         activas = [c for c in self.cfg.get("camaras", []) if c.get("activa")]
         self.labels_video.clear()
         self.labels_estado_cam.clear()
 
         if not activas:
-            lbl = QLabel("No hay cámaras activas.\nAgrégalas en la pestaña Configuración.")
-            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            lbl.setMinimumSize(700, 520)
-            lbl.setStyleSheet(
-                "background: transparent; border: none; color: #a5a5a5; font-size: 15px;"
-            )
-            grid.addWidget(lbl, 0, 0)
+            vacio = QWidget()
+            vacio.setStyleSheet("background: transparent;")
+            vacio.setMinimumSize(400, 320)
+            vv = QVBoxLayout(vacio)
+            vv.setContentsMargins(24, 48, 24, 48)
+            vv.setSpacing(10)
+            vv.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            ico = IconWidget(FIcon.VIDEO, vacio)
+            ico.setFixedSize(48, 48)
+            vv.addWidget(ico, 0, Qt.AlignmentFlag.AlignCenter)
+            tit = SubtitleLabel("Sin cámaras activas", vacio)
+            vv.addWidget(tit, 0, Qt.AlignmentFlag.AlignCenter)
+            hint = CaptionLabel(
+                "Activa o agrega una cámara en Configuración para iniciar la vigilancia.", vacio)
+            hint.setStyleSheet("color: rgba(139, 151, 168, 0.9);")
+            vv.addWidget(hint, 0, Qt.AlignmentFlag.AlignCenter)
+            grid.addWidget(vacio, 0, 0)
         else:
             cols = 2 if len(activas) > 1 else 1
             for i, cam in enumerate(activas):
@@ -651,9 +685,12 @@ class VentanaPrincipal(FluentWindow):
                 nombre_cam = cam.get("nombre") or str(cam_id)
                 grupo.setTitle(f"{nombre_cam} - {curso_cam}" if curso_cam else nombre_cam)
                 grupo.viewLayout.setDirection(QBoxLayout.Direction.TopToBottom)
+                grupo.viewLayout.setContentsMargins(12, 8, 12, 12)
                 lbl_video = QLabel("Sin señal")
                 lbl_video.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                lbl_video.setMinimumSize(640, 360)
+                lbl_video.setMinimumSize(320, 220)
+                lbl_video.setSizePolicy(
+                    QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
                 lbl_video.setStyleSheet(ESTILO_VIDEO)
                 grupo.viewLayout.addWidget(lbl_video, 1)
                 self.labels_video[cam_id] = lbl_video
@@ -677,8 +714,8 @@ class VentanaPrincipal(FluentWindow):
         calendarios: el rango lo define la pestaña Clases."""
         tab = QWidget()
         layout = QVBoxLayout(tab)
-        layout.setContentsMargins(4, 4, 4, 4)
-        layout.setSpacing(12)
+        layout.setContentsMargins(16, 12, 16, 16)
+        layout.setSpacing(14)
 
         grupo = HeaderCardWidget()
         grupo.setTitle("Historial de clases")
@@ -686,11 +723,12 @@ class VentanaPrincipal(FluentWindow):
         # viewLayout de HeaderCardWidget es horizontal por defecto: sin esto,
         # filtros/resumen/matriz quedan LADO A LADO (matriz exprimida a la derecha)
         lg.setDirection(QBoxLayout.Direction.TopToBottom)
-        lg.setSpacing(10)
+        lg.setContentsMargins(16, 12, 16, 14)
+        lg.setSpacing(12)
 
         # fila 1: selectores de curso/sección + detalles + búsqueda + acciones
         fila1 = QHBoxLayout()
-        fila1.setSpacing(8)
+        fila1.setSpacing(10)
         self.lbl_curso_hist = CaptionLabel("Curso:")
         self.combo_curso_hist = ComboBox()
         self.combo_curso_hist.setMinimumWidth(200)
@@ -711,8 +749,10 @@ class VentanaPrincipal(FluentWindow):
         fila1.addSpacing(10)
         fila1.addWidget(self.sw_detalles_hist)
         fila1.addStretch(1)
-        self.edit_buscar_hist = LineEdit()
+        self.edit_buscar_hist = SearchLineEdit()
         self.edit_buscar_hist.setPlaceholderText("Buscar alumno…")
+        self.edit_buscar_hist.setMinimumWidth(200)
+        self.edit_buscar_hist.setClearButtonEnabled(True)
         self.btn_exportar = PushButton("Exportar CSV")
         self.btn_exportar.setObjectName("secundario")
         self.btn_exportar.clicked.connect(self._exportar_csv)
@@ -737,8 +777,8 @@ class VentanaPrincipal(FluentWindow):
         cont_historial = QWidget()
         cont_historial.setStyleSheet("background: transparent;")
         self.v_cuerpo_historial = QVBoxLayout(cont_historial)
-        self.v_cuerpo_historial.setContentsMargins(4, 4, 4, 4)
-        self.v_cuerpo_historial.setSpacing(12)
+        self.v_cuerpo_historial.setContentsMargins(4, 6, 4, 8)
+        self.v_cuerpo_historial.setSpacing(14)
         self._hist_grupos = []
         self._hist_filas = []
         self.estado_vacio = EstadoVacioHistorial(cont_historial)
@@ -771,20 +811,22 @@ class VentanaPrincipal(FluentWindow):
     def _construir_tab_alumnos(self):
         tab = QWidget()
         layout = QVBoxLayout(tab)
-        layout.setContentsMargins(4, 4, 4, 4)
-        layout.setSpacing(12)
+        layout.setContentsMargins(16, 12, 16, 16)
+        layout.setSpacing(14)
 
         barra = QHBoxLayout()
-        barra.setSpacing(10)
+        barra.setSpacing(12)
         self.btn_agregar_alumno = PushButton("Agregar alumno")
         self.btn_agregar_alumno.setObjectName("exito")
+        self.btn_agregar_alumno.setMinimumHeight(34)
         self.btn_agregar_alumno.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_agregar_alumno.clicked.connect(self._agregar_alumno)
         self.chk_inactivos = CheckBox()
-        self.chk_inactivos.setText("Mostrar dados de baja")
+        self.chk_inactivos.setText("Ver inactivos")
         self.chk_inactivos.toggled.connect(lambda _v: self._actualizar_galeria())
-        self.edit_buscar_alum = LineEdit()
-        self.edit_buscar_alum.setPlaceholderText("Buscar alumno…")
+        self.edit_buscar_alum = SearchLineEdit()
+        self.edit_buscar_alum.setPlaceholderText("Buscar por apellido, nombre o curso…")
+        self.edit_buscar_alum.setMinimumWidth(260)
         self.edit_buscar_alum.textChanged.connect(lambda _: self._actualizar_galeria())
         barra.addWidget(self.btn_agregar_alumno)
         barra.addWidget(self.chk_inactivos)
@@ -796,7 +838,7 @@ class VentanaPrincipal(FluentWindow):
         grupo_galeria.setTitle("Alumnos registrados")
         grupo_galeria.viewLayout.setDirection(QBoxLayout.Direction.TopToBottom)
         layout_galeria = grupo_galeria.viewLayout
-        layout_galeria.setContentsMargins(10, 6, 10, 10)
+        layout_galeria.setContentsMargins(12, 8, 12, 12)
 
         scroll = SmoothScrollArea()
         scroll.setWidgetResizable(True)
@@ -805,14 +847,17 @@ class VentanaPrincipal(FluentWindow):
         scroll.viewport().installEventFilter(self)
         self.galeria_alumnos = QWidget()
         self.galeria_alumnos.setStyleSheet("background: transparent;")
-        self.grid_alumnos = FlowLayout(self.galeria_alumnos)
+        self.grid_alumnos = QGridLayout(self.galeria_alumnos)
         self.grid_alumnos.setContentsMargins(12, 12, 12, 12)
         self.grid_alumnos.setSpacing(TarjetaAlumno.ESPACIO)
+        self.grid_alumnos.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        self._tarjetas_alumnos = []
+        self._galeria_cols = 0
         scroll.setWidget(self.galeria_alumnos)
         layout_galeria.addWidget(scroll)
         self._timer_reflow = QTimer(self)
         self._timer_reflow.setSingleShot(True)
-        self._timer_reflow.setInterval(120)
+        self._timer_reflow.setInterval(80)
         self._timer_reflow.timeout.connect(self._reflow_galeria)
         layout.addWidget(grupo_galeria, 1)
 
@@ -821,50 +866,95 @@ class VentanaPrincipal(FluentWindow):
     def _actualizar_galeria(self):
         while self.grid_alumnos.count():
             item = self.grid_alumnos.takeAt(0)
-            w = item if isinstance(item, QWidget) else getattr(item, "widget", lambda: None)()
+            w = item.widget() if item is not None else None
             if w is not None:
+                w.hide()
+                w.setParent(None)
                 w.deleteLater()
+        self._tarjetas_alumnos = []
         alumnos = gestor.listar(incluir_inactivos=self.chk_inactivos.isChecked())
+        alumnos.sort(key=lambda a: (
+            str(a.get("apellidos", "") or "").strip() == "",
+            str(a.get("apellidos", "") or "").strip().lower(),
+            str(a.get("nombre", "") or "").strip().lower(),
+        ))
         texto = self.edit_buscar_alum.text().strip().lower() if hasattr(self, "edit_buscar_alum") else ""
         if texto:
             def _texto_busqueda(a):
-                partes = [str(a.get(k, "") or "")
-                          for k in ("nombre", "apellidos", "curso", "seccion")]
+                ap = str(a.get("apellidos", "") or "")
+                nom = str(a.get("nombre", "") or "")
+                partes = [nom, ap, f"{ap}, {nom}", f"{nom} {ap}",
+                          str(a.get("curso", "") or ""),
+                          str(a.get("seccion", "") or "")]
                 partes += [f"{i.get('curso', '')} {i.get('seccion', '')}"
                            for i in (a.get("inscripciones") or [])
                            if isinstance(i, dict)]
                 return " ".join(partes).lower()
             alumnos = [a for a in alumnos if texto in _texto_busqueda(a)]
-        for alumno in alumnos:
-            tarjeta = TarjetaAlumno(alumno, ancho=self._ancho_tarjeta_galeria())
-            tarjeta.clickeado.connect(self._editar_alumno)
-            self.grid_alumnos.addWidget(tarjeta)
-        if not alumnos:
-            lbl = BodyLabel()
-            lbl.setText('No hay alumnos registrados. Use "Agregar alumno".')
-            self.grid_alumnos.addWidget(lbl)
 
-    def _ancho_tarjeta_galeria(self):
-        """Ancho de tarjeta para que cada fila de la galeria llene el panel."""
+        ancho, cols = self._metricas_galeria()
+        self._galeria_cols = cols
+        for idx, alumno in enumerate(alumnos):
+            tarjeta = TarjetaAlumno(alumno, ancho=ancho)
+            tarjeta.clickeado.connect(self._editar_alumno)
+            self._tarjetas_alumnos.append(tarjeta)
+            self.grid_alumnos.addWidget(tarjeta, idx // cols, idx % cols)
+
+        if not alumnos:
+            vacio = QWidget()
+            vacio.setStyleSheet("background: transparent;")
+            vacio.setMinimumWidth(max(320, self.scroll_galeria.viewport().width() - 48))
+            vv = QVBoxLayout(vacio)
+            vv.setContentsMargins(24, 56, 24, 56)
+            vv.setSpacing(10)
+            vv.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            ico = IconWidget(FIcon.PEOPLE, vacio)
+            ico.setFixedSize(48, 48)
+            vv.addWidget(ico, 0, Qt.AlignmentFlag.AlignCenter)
+            tit = SubtitleLabel(
+                "Sin coincidencias" if texto else "No hay alumnos registrados", vacio)
+            vv.addWidget(tit, 0, Qt.AlignmentFlag.AlignCenter)
+            hint = CaptionLabel(
+                "Prueba con otro término de búsqueda."
+                if texto else 'Usa "Agregar alumno" para registrar el primero.', vacio)
+            hint.setStyleSheet("color: rgba(139, 151, 168, 0.9);")
+            vv.addWidget(hint, 0, Qt.AlignmentFlag.AlignCenter)
+            self.grid_alumnos.addWidget(vacio, 0, 0)
+
+    def _metricas_galeria(self):
+        """Devuelve (ancho_tarjeta, columnas) ajustado al viewport actual."""
         try:
-            disp = self.scroll_galeria.viewport().width() - 24  # margenes del FlowLayout
+            disp = self.scroll_galeria.viewport().width() - 24
         except Exception:
             disp = 0
         espacio = TarjetaAlumno.ESPACIO
         if disp < TarjetaAlumno.MIN_ANCHO:
-            return TarjetaAlumno.MIN_ANCHO
+            return TarjetaAlumno.MIN_ANCHO, 1
         columnas = max(1, (disp + espacio) // (TarjetaAlumno.MIN_ANCHO + espacio))
         ancho = (disp - (columnas - 1) * espacio) // columnas
-        return int(max(TarjetaAlumno.MIN_ANCHO, ancho))
+        return int(max(TarjetaAlumno.MIN_ANCHO, ancho)), int(columnas)
+
+    def _ancho_tarjeta_galeria(self):
+        return self._metricas_galeria()[0]
 
     def _reflow_galeria(self):
-        """Reajusta el ancho de las tarjetas existentes al espacio actual."""
-        ancho = self._ancho_tarjeta_galeria()
-        for i in range(self.grid_alumnos.count()):
-            item = self.grid_alumnos.itemAt(i)
-            w = item if isinstance(item, QWidget) else getattr(item, "widget", lambda: None)()
-            if isinstance(w, TarjetaAlumno):
+        """Reajusta el ancho y posición en grilla de las tarjetas existentes."""
+        if not getattr(self, "_tarjetas_alumnos", None):
+            return
+        ancho, cols = self._metricas_galeria()
+        recolocar = cols != getattr(self, "_galeria_cols", 0)
+        if recolocar:
+            self._galeria_cols = cols
+            while self.grid_alumnos.count():
+                self.grid_alumnos.takeAt(0)
+            for idx, w in enumerate(self._tarjetas_alumnos):
                 w.set_ancho(ancho)
+                self.grid_alumnos.addWidget(w, idx // cols, idx % cols)
+        else:
+            for w in self._tarjetas_alumnos:
+                w.set_ancho(ancho)
+        self.grid_alumnos.activate()
+        self.galeria_alumnos.update()
 
     def _agregar_alumno(self):
         dialogo = DialogoAlumno(
@@ -886,6 +976,8 @@ class VentanaPrincipal(FluentWindow):
         self._push_referencias()
         self._actualizar_galeria()
         self._actualizar_historial()
+        if hasattr(self, "panel_clases"):
+            self.panel_clases.refrescar()
         self.mostrar_toast(mensaje)
 
     # ---------------- Referencias / reconocimiento ----------------
@@ -957,7 +1049,7 @@ class VentanaPrincipal(FluentWindow):
             self._enlace_wifi.start()
         self.btn_iniciar.setEnabled(False)
         self.btn_detener.setEnabled(True)
-        self.lbl_estado.setText(f"Cámaras: iniciando ({len(self.hilos)})…")
+        self.lbl_estado.setText(f"Iniciando vigilancia ({len(self.hilos)})…")
         self._estilo_estado(self.lbl_estado, True)
 
     def _iniciar_servidor_web(self):
@@ -1185,7 +1277,7 @@ class VentanaPrincipal(FluentWindow):
         self._actualizar_simulador_lcd()
         self.btn_iniciar.setEnabled(True)
         self.btn_detener.setEnabled(False)
-        self.lbl_estado.setText("Cámaras: detenidas")
+        self.lbl_estado.setText("En espera")
         self._estilo_estado(self.lbl_estado, False)
         for lbl in self.labels_estado_cam.values():
             lbl.setText("Cámara: detenida")
@@ -1256,7 +1348,9 @@ class VentanaPrincipal(FluentWindow):
             lbl.setText("Cámara: activa" if activa else "Cámara: detenida")
             self._estilo_estado(lbl, activa)
         if activa:
-            self.lbl_estado.setText(f"Cámaras: activas ({len(self.hilos)})")
+            n = len(self.hilos)
+            self.lbl_estado.setText(
+                f"Vigilancia activa ({n} cámara{'s' if n != 1 else ''})")
             self._estilo_estado(self.lbl_estado, True)
 
     def _on_error_cam(self, cam_id, mensaje):
@@ -1496,7 +1590,12 @@ class VentanaPrincipal(FluentWindow):
         fechas_curso = {}
         for a in activos:
             aid = a["alumno_id"]
-            nombre = str(a.get("nombre", "") or "")
+            nombre_solo = str(a.get("nombre", "") or "").strip()
+            apellidos = str(a.get("apellidos", "") or "").strip()
+            if apellidos and nombre_solo:
+                nombre_mostrar = f"{apellidos}, {nombre_solo}"
+            else:
+                nombre_mostrar = apellidos or nombre_solo or "Sin nombre"
             insc = inscripciones.get(aid)
             if not insc:
                 cs = str(a.get("curso", "") or "").strip()
@@ -1542,19 +1641,25 @@ class VentanaPrincipal(FluentWindow):
                         clases += 1
                 filas.append({
                     "alumno_id": aid,
-                    "nombre": nombre,
+                    "nombre": nombre_mostrar,
+                    "nombre_solo": nombre_solo,
+                    "apellidos": apellidos,
                     "foto": gestor.ruta_foto_absoluta(a.get("foto_referencia")),
                     "porcentaje": (puntos / clases) if clases else None,
                     "curso": curso,
                     "seccion": seccion,
                     "texto_busqueda": " ".join(
-                        [nombre, curso, seccion] + estados).lower(),
+                        [apellidos, nombre_solo, nombre_mostrar,
+                         f"{nombre_solo} {apellidos}", curso, seccion]
+                        + estados).lower(),
                     "celdas": celdas,
                 })
 
-        filas.sort(key=lambda x: (x["curso"] == "", x["curso"],
-                                  x["seccion"] == "", x["seccion"],
-                                  x["nombre"]))
+        filas.sort(key=lambda x: (
+            x["curso"] == "", x["curso"],
+            x["seccion"] == "", x["seccion"],
+            x["apellidos"] == "", x["apellidos"].lower(), x["nombre_solo"].lower(),
+        ))
         self._hist_filas = filas
         self._hist_fechas = fechas_curso
 
@@ -1703,8 +1808,13 @@ class VentanaPrincipal(FluentWindow):
                 tarjeta.btn_chevron.setIcon(FIcon.CARE_DOWN_SOLID)
 
             for seccion in sorted(arbol[curso], key=lambda s: (s == "", s)):
-                filas_seccion = sorted(arbol[curso][seccion],
-                                       key=lambda x: str(x.get("nombre") or ""))
+                filas_seccion = sorted(
+                    arbol[curso][seccion],
+                    key=lambda x: (
+                        str(x.get("apellidos") or "") == "",
+                        str(x.get("apellidos") or "").lower(),
+                        str(x.get("nombre_solo") or x.get("nombre") or "").lower(),
+                    ))
                 tabla = TablaSeccion(seccion, fechas_curso.get(curso, []),
                                      filas_seccion, self._hist_detalles,
                                      tarjeta)
@@ -1769,15 +1879,19 @@ class VentanaPrincipal(FluentWindow):
         try:
             with open(ruta, "w", encoding="utf-8-sig", newline="") as fh:
                 wr = csv.writer(fh, delimiter=";")
-                wr.writerow(["Fecha", "Curso", "Seccion", "Alumno", "Estado",
-                             "Entrada", "Salida", "Minutos", "Marcas"])
+                wr.writerow(["Fecha", "Curso", "Sección", "Apellidos", "Nombres",
+                             "Estado", "Entrada", "Salida", "Minutos", "Marcas"])
                 for f in sorted(filas, key=lambda x: (
-                        str(x.get("curso") or ""), str(x.get("nombre") or ""))):
+                        str(x.get("curso") or ""),
+                        str(x.get("apellidos") or "") == "",
+                        str(x.get("apellidos") or "").lower(),
+                        str(x.get("nombre_solo") or "").lower())):
                     for fecha in sorted(f["celdas"]):
                         c = f["celdas"][fecha]
                         wr.writerow([
                             fecha, f.get("curso") or "", f.get("seccion") or "",
-                            f.get("nombre") or "",
+                            f.get("apellidos") or "",
+                            f.get("nombre_solo") or f.get("nombre") or "",
                             str(c.get("estado") or "Sin registro"),
                             hhmm(c.get("entrada")) or "",
                             hhmm(c.get("salida")) or "",
@@ -1792,9 +1906,11 @@ class VentanaPrincipal(FluentWindow):
 
 
     def _on_cursos_cambiados(self, cfg):
-        """Cursos/secciones editados: actualizar horarios dependientes y matriz."""
+        """Cursos/secciones editados: actualizar horarios dependientes, galería y matriz."""
         self.cfg = cfg
         self.panel_config.cfg = cfg   # panel_config parte del mismo estado
+        self._cargar_referencias()
+        self._actualizar_galeria()
         self._actualizar_historial()
         self.mostrar_toast("Cursos y secciones guardados.")
 

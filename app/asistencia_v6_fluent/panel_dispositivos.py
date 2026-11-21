@@ -24,6 +24,7 @@ from PyQt6.QtWidgets import (
 from qfluentwidgets import (
     CardWidget, SubtitleLabel, BodyLabel, CaptionLabel, StrongBodyLabel,
     PushButton, PrimaryPushButton, SmoothScrollArea, InfoBadge,
+    IconWidget, FluentIcon as FIcon,
 )
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -37,27 +38,28 @@ class TarjetaTelefono(CardWidget):
         super().__init__(padre)
         self.tel_id = tel_id
         self.padre = padre
-        self.setFixedHeight(96)
+        self.setMinimumHeight(88)
 
         h = QHBoxLayout(self)
-        h.setContentsMargins(16, 10, 12, 10)
+        h.setContentsMargins(16, 14, 16, 14)
         h.setSpacing(12)
 
         col = QVBoxLayout()
-        col.setSpacing(2)
+        col.setSpacing(4)
         self.lbl_nombre = StrongBodyLabel("—", self)
         self.lbl_detalle = CaptionLabel("", self)
         col.addWidget(self.lbl_nombre)
         col.addWidget(self.lbl_detalle)
         h.addLayout(col, 1)
 
-        self.badge = InfoBadge.custom("libre", "#e4e4e7", "#3f3f46", parent=self)
-        h.addWidget(self.badge)
+        self.badge = InfoBadge.custom("libre", "#12261f", "#12261f", parent=self)
+        h.addWidget(self.badge, 0, Qt.AlignmentFlag.AlignVCenter)
 
         self.btn_libre = PushButton("Liberar", self)
         self.btn_ocultar = PushButton("Ocultar controles", self)
         self.btn_bloquear = PrimaryPushButton("Bloquear", self)
         for b in (self.btn_libre, self.btn_ocultar, self.btn_bloquear):
+            b.setMinimumHeight(32)
             h.addWidget(b)
 
         self.btn_libre.clicked.connect(lambda: self.padre.cambiar_estado(
@@ -82,13 +84,16 @@ class TarjetaTelefono(CardWidget):
             "color: #34d399;" if online else "color: #f87171;")
 
         estado = reg.get("estado", "libre")
-        texto, fondo = {
-            "libre": ("libre", "#34d399"),
-            "controles_ocultos": ("controles ocultos", "#fbbf24"),
-            "bloqueado": ("BLOQUEADO", "#f87171"),
-        }.get(estado, (estado, "#8b97a8"))
+        texto, bg, fg = {
+            "libre": ("Libre", "#12261f", "#34d399"),
+            "controles_ocultos": ("Controles ocultos", "#2a2414", "#fbbf24"),
+            "bloqueado": ("Bloqueado", "#2a1414", "#f87171"),
+        }.get(estado, (estado, "#18202b", "#cbd5e1"))
         self.badge.setText(texto)
-        self.badge.setCustomBackgroundColor(fondo, fondo)
+        self.badge.setCustomBackgroundColor(bg, bg)
+        self.badge.setStyleSheet(
+            f"color: {fg}; font-weight: 600; padding: 3px 10px; border-radius: 999px;"
+        )
 
 
 class PanelDispositivos(QWidget):
@@ -103,8 +108,8 @@ class PanelDispositivos(QWidget):
         self._tarjetas = {}
 
         v = QVBoxLayout(self)
-        v.setContentsMargins(8, 8, 8, 8)
-        v.setSpacing(10)
+        v.setContentsMargins(28, 20, 28, 24)
+        v.setSpacing(14)
 
         cab = QHBoxLayout()
         self.lbl_titulo = SubtitleLabel("Dispositivos", self)
@@ -116,15 +121,15 @@ class PanelDispositivos(QWidget):
         cab.addStretch(1)
         btn_refrescar = PushButton("Actualizar", self)
         btn_refrescar.setObjectName("secundario")
+        btn_refrescar.setMinimumHeight(32)
         btn_refrescar.clicked.connect(self.refrescar)
         cab.addWidget(btn_refrescar)
         v.addLayout(cab)
 
         url_telefono = f"https://{ip_local()}:8443/telefono"
         self.lbl_ayuda = CaptionLabel(
-            f"Abre {url_telefono} en el celular para usarlo como cámara "
-            "del aula. Desde aquí fijas su modo para que nadie lo manipule. "
-            "(centinela.local solo resuelve si tu red tiene mDNS.)", self)
+            f"Abre {url_telefono} en el celular para usarlo como cámara del aula "
+            "y controlar sus botones desde aquí.", self)
         self.lbl_ayuda.setWordWrap(True)
         self.lbl_ayuda.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -137,11 +142,26 @@ class PanelDispositivos(QWidget):
         self.contenedor = QWidget()
         self.contenedor.setStyleSheet("background: transparent;")
         self.v_tarjetas = QVBoxLayout(self.contenedor)
-        self.v_tarjetas.setContentsMargins(0, 0, 0, 0)
-        self.v_tarjetas.setSpacing(8)
-        self.lbl_vacio = BodyLabel(
-            "Sin teléfonos conectados todavía.", self.contenedor)
-        self.lbl_vacio.setStyleSheet("color: rgba(139, 151, 168, 0.9);")
+        self.v_tarjetas.setContentsMargins(0, 4, 0, 4)
+        self.v_tarjetas.setSpacing(12)
+
+        self.lbl_vacio = QWidget(self.contenedor)
+        self.lbl_vacio.setStyleSheet("background: transparent;")
+        v_vacio = QVBoxLayout(self.lbl_vacio)
+        v_vacio.setContentsMargins(24, 56, 24, 56)
+        v_vacio.setSpacing(10)
+        v_vacio.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        ico_vacio = IconWidget(FIcon.PHONE, self.lbl_vacio)
+        ico_vacio.setFixedSize(48, 48)
+        v_vacio.addWidget(ico_vacio, 0, Qt.AlignmentFlag.AlignCenter)
+        tit_vacio = SubtitleLabel("Sin teléfonos conectados", self.lbl_vacio)
+        v_vacio.addWidget(tit_vacio, 0, Qt.AlignmentFlag.AlignCenter)
+        sub_vacio = CaptionLabel(
+            f"Abre {url_telefono} en el navegador del celular para vincularlo.",
+            self.lbl_vacio)
+        sub_vacio.setStyleSheet("color: rgba(139, 151, 168, 0.9);")
+        v_vacio.addWidget(sub_vacio, 0, Qt.AlignmentFlag.AlignCenter)
+
         self.v_tarjetas.addWidget(self.lbl_vacio)
         self.v_tarjetas.addStretch(1)
         scroll.setWidget(self.contenedor)

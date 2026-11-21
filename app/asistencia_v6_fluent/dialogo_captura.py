@@ -45,6 +45,7 @@ class DialogoCaptura(MessageBoxBase):
         self.widget.setMinimumWidth(680)
 
         self.titleLabel = SubtitleLabel("Capturar foto del alumno")
+        self.viewLayout.setSpacing(12)
         self.viewLayout.addWidget(self.titleLabel)
 
         fila_cam = QHBoxLayout()
@@ -77,8 +78,10 @@ class DialogoCaptura(MessageBoxBase):
         fila_botones = QHBoxLayout()
         fila_botones.setSpacing(10)
         self.btn_capturar = PrimaryPushButton("Capturar")
+        self.btn_capturar.setMinimumHeight(32)
         self.btn_capturar.clicked.connect(self._capturar)
         self.btn_repetir = PushButton("Repetir")
+        self.btn_repetir.setMinimumHeight(32)
         self.btn_repetir.setEnabled(False)
         self.btn_repetir.clicked.connect(self._repetir)
         fila_botones.addWidget(self.btn_capturar, 1)

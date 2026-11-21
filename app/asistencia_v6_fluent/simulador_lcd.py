@@ -21,19 +21,19 @@ class SimuladorLCD(HeaderCardWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setTitle("Simulacion LCD 16x2")
+        self.setTitle("Simulación LCD 16x2")
         self.viewLayout.setDirection(QBoxLayout.Direction.TopToBottom)
         layout = self.viewLayout
-        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setContentsMargins(14, 10, 14, 14)
         layout.setSpacing(6)
 
         self.lbl_pantalla = QLabel()
         self.lbl_pantalla.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lbl_pantalla.setTextFormat(Qt.TextFormat.PlainText)
         self.lbl_pantalla.setStyleSheet(
-            "background: #0f1a12; color: #7cffb2;"
-            "border: 1px solid #2a4a34; border-radius: 10px;"
-            "padding: 10px 12px; font-family: 'Consolas', 'Courier New';"
+            "background: #0b1810; color: #6ef7a7;"
+            "border: 2px solid #243e2d; border-radius: 8px;"
+            "padding: 10px 14px; font-family: 'Consolas', 'Courier New';"
             "font-size: 16px; font-weight: 600; letter-spacing: 2px;"
         )
         fuente = QFont("Consolas", 16)
@@ -41,9 +41,9 @@ class SimuladorLCD(HeaderCardWidget):
         fuente.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 2)
         self.lbl_pantalla.setFont(fuente)
         fm = QFontMetrics(fuente)
-        ancho = fm.horizontalAdvance("M" * 16) + 28
+        ancho = fm.horizontalAdvance("M" * 16) + 32
         self.lbl_pantalla.setFixedWidth(ancho)
-        self.lbl_pantalla.setMinimumHeight(54)
+        self.lbl_pantalla.setMinimumHeight(60)
         layout.addWidget(self.lbl_pantalla, alignment=Qt.AlignmentFlag.AlignCenter)
 
         self._timer = QTimer(self)

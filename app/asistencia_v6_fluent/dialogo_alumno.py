@@ -49,41 +49,62 @@ class DialogoAlumno(MessageBoxBase):
         self._imagen_nueva = None   # ndarray BGR elegido/capturado, o None
         self._trabajo = None
 
-        self.widget.setMinimumWidth(560)
+        self.widget.setMinimumWidth(740)
 
         self.titleLabel = SubtitleLabel(
             "Nuevo alumno" if self._nuevo else "Editar alumno")
+        self.viewLayout.setSpacing(12)
         self.viewLayout.addWidget(self.titleLabel)
 
-        # --- Campos del formulario (con scroll para no crecer sin límite) ---
+        # --- Campos del formulario ---
         self.edit_nombre = LineEdit()
+        self.edit_nombre.setPlaceholderText("Ej. Erick Obed")
+        self.edit_nombre.setClearButtonEnabled(True)
         self.edit_nombre.setText(self._alumno.get("nombre", "") or "")
+
         self.edit_apellidos = LineEdit()
+        self.edit_apellidos.setPlaceholderText("Ej. Flores Ricra")
+        self.edit_apellidos.setClearButtonEnabled(True)
         self.edit_apellidos.setText(self._alumno.get("apellidos", "") or "")
+
         self.edit_dni = LineEdit()
+        self.edit_dni.setPlaceholderText("Documento de identidad (opcional)")
+        self.edit_dni.setClearButtonEnabled(True)
         self.edit_dni.setText(self._alumno.get("dni", "") or "")
+
         self._cfg = config_app.cargar()
+
         self.edit_telefono = LineEdit()
+        self.edit_telefono.setPlaceholderText("Ej. 987 654 321 (opcional)")
         self.edit_telefono.setText(self._alumno.get("telefono", "") or "")
+
         self.edit_email = LineEdit()
+        self.edit_email.setPlaceholderText("correo@ejemplo.com (opcional)")
         self.edit_email.setText(self._alumno.get("email", "") or "")
+
         self.edit_tutor = LineEdit()
+        self.edit_tutor.setPlaceholderText("Nombre del apoderado (opcional)")
         self.edit_tutor.setText(self._alumno.get("tutor_nombre", "") or "")
+
         self.edit_tutor_tel = LineEdit()
+        self.edit_tutor_tel.setPlaceholderText("Teléfono del apoderado (opcional)")
         self.edit_tutor_tel.setText(self._alumno.get("tutor_telefono", "") or "")
+
         self.combo_condicion = ComboBox()
-        self.combo_condicion.addItems(["regular", "irregular"])
-        self.combo_condicion.setCurrentText(
-            self._alumno.get("condicion", "regular") or "regular")
+        self.combo_condicion.addItems(["Regular", "Irregular"])
+        cond_actual = str(self._alumno.get("condicion", "regular") or "regular").strip().lower()
+        self.combo_condicion.setCurrentIndex(1 if cond_actual == "irregular" else 0)
+
         self.edit_observaciones = TextEdit()
+        self.edit_observaciones.setPlaceholderText("Notas médicas, permisos o comentarios (opcional)…")
         self.edit_observaciones.setPlainText(
             self._alumno.get("observaciones", "") or "")
-        self.edit_observaciones.setFixedHeight(60)
+        self.edit_observaciones.setFixedHeight(64)
 
         def fila(etiqueta, widget):
             h = QHBoxLayout()
             l = CaptionLabel(etiqueta)
-            l.setFixedWidth(100)
+            l.setFixedWidth(92)
             h.addWidget(l)
             h.addWidget(widget, 1)
             return h
@@ -92,20 +113,21 @@ class DialogoAlumno(MessageBoxBase):
         cuerpo.setStyleSheet("background: transparent;")
         form = QVBoxLayout(cuerpo)
         form.setSpacing(10)
-        form.setContentsMargins(0, 0, 0, 0)
+        form.setContentsMargins(0, 4, 12, 4)
         form.addLayout(fila("Nombre:", self.edit_nombre))
         form.addLayout(fila("Apellidos:", self.edit_apellidos))
         form.addLayout(fila("DNI:", self.edit_dni))
 
-        # ---- Inscripciones: varios cursos, una seccion por curso ----
-        lbl_insc = CaptionLabel("Inscripciones (curso · sección):")
+        # ---- Inscripciones: varios cursos, una sección por curso ----
+        lbl_insc = CaptionLabel("Cursos y secciones:")
         form.addWidget(lbl_insc)
         self._filas_insc = []   # (contenedor, combo_curso, combo_seccion)
         self._v_insc = QVBoxLayout()
         self._v_insc.setSpacing(6)
         form.addLayout(self._v_insc)
-        btn_add_insc = PushButton("Agregar curso")
+        btn_add_insc = PushButton(FIcon.ADD, "Agregar curso")
         btn_add_insc.setObjectName("secundario")
+        btn_add_insc.setMinimumHeight(30)
         btn_add_insc.clicked.connect(self._agregar_inscripcion)
         fila_add = QHBoxLayout()
         fila_add.addStretch(1)
@@ -121,12 +143,12 @@ class DialogoAlumno(MessageBoxBase):
         if not self._filas_insc:
             self._agregar_inscripcion()
 
-        form.addLayout(fila("Telefono:", self.edit_telefono))
+        form.addLayout(fila("Teléfono:", self.edit_telefono))
         form.addLayout(fila("Email:", self.edit_email))
         form.addLayout(fila("Tutor:", self.edit_tutor))
         form.addLayout(fila("Tel. tutor:", self.edit_tutor_tel))
-        form.addLayout(fila("Condicion:", self.combo_condicion))
-        form.addLayout(fila("Observaciones:", self.edit_observaciones))
+        form.addLayout(fila("Condición:", self.combo_condicion))
+        form.addLayout(fila("Notas:", self.edit_observaciones))
 
         scroll = ScrollArea()
         scroll.setWidgetResizable(True)
@@ -134,49 +156,66 @@ class DialogoAlumno(MessageBoxBase):
         scroll.setStyleSheet(
             "QScrollArea { border: none; background: transparent; }"
             " QScrollArea > QWidget > QWidget { background: transparent; }")
-        scroll.setFixedHeight(290)
-        self.viewLayout.addWidget(scroll)
+        scroll.setMinimumHeight(380)
 
-        # --- Imagen ---
+        # --- Panel derecho: Foto + acciones ---
         oscuro = isDarkTheme()
         fondo_img = "rgba(255, 255, 255, 0.06)" if oscuro else "rgba(0, 0, 0, 0.05)"
         borde_img = "rgba(255, 255, 255, 0.14)" if oscuro else "rgba(0, 0, 0, 0.12)"
         self.lbl_imagen = QLabel()
-        self.lbl_imagen.setFixedSize(180, 180)
+        self.lbl_imagen.setFixedSize(196, 196)
         self.lbl_imagen.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_imagen.setWordWrap(True)
         self.lbl_imagen.setStyleSheet(
             f"background: {fondo_img}; border: 1px solid {borde_img};"
-            " border-radius: 12px; color: rgba(128, 128, 128, 0.9); font-size: 12px;"
+            " border-radius: 12px; color: rgba(148, 163, 184, 0.9); font-size: 12px;"
+            " padding: 10px;"
         )
-        self.viewLayout.addWidget(self.lbl_imagen, 0, Qt.AlignmentFlag.AlignHCenter)
 
-        fila_img = QHBoxLayout()
-        fila_img.setSpacing(10)
-        self.btn_capturar = PushButton("Capturar con cámara…")
+        self.btn_capturar = PushButton(FIcon.CAMERA, "Capturar con cámara…")
+        self.btn_capturar.setMinimumHeight(34)
         self.btn_capturar.clicked.connect(self._capturar)
-        self.btn_archivo = PushButton("Elegir archivo…")
+        self.btn_archivo = PushButton(FIcon.FOLDER, "Elegir archivo…")
+        self.btn_archivo.setMinimumHeight(34)
         self.btn_archivo.clicked.connect(self._elegir_archivo)
-        fila_img.addWidget(self.btn_capturar, 1)
-        fila_img.addWidget(self.btn_archivo, 1)
-        self.viewLayout.addLayout(fila_img)
+
+        col_foto = QVBoxLayout()
+        col_foto.setSpacing(10)
+        col_foto.setContentsMargins(0, 4, 0, 0)
+        col_foto.addWidget(self.lbl_imagen, 0, Qt.AlignmentFlag.AlignHCenter)
+        col_foto.addWidget(self.btn_capturar)
+        col_foto.addWidget(self.btn_archivo)
+
+        if not self._nuevo:
+            inactivo = self._alumno.get("estado") == "inactivo"
+            col_foto.addSpacing(8)
+            lbl_est = CaptionLabel(
+                "Estado: inactivo (oculto)" if inactivo else "Estado: activo")
+            lbl_est.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            lbl_est.setStyleSheet(
+                "color: #fbbf24;" if inactivo else "color: #34d399;")
+            self.btn_estado = PushButton("Reactivar" if inactivo else "Dar de baja…")
+            self.btn_estado.setMinimumHeight(32)
+            self.btn_estado.clicked.connect(self._cambiar_estado)
+            col_foto.addWidget(lbl_est)
+            col_foto.addWidget(self.btn_estado)
+
+        col_foto.addStretch(1)
+
+        panel_foto = QWidget()
+        panel_foto.setStyleSheet("background: transparent;")
+        panel_foto.setFixedWidth(212)
+        panel_foto.setLayout(col_foto)
+
+        fila_principal = QHBoxLayout()
+        fila_principal.setSpacing(18)
+        fila_principal.addWidget(scroll, 1)
+        fila_principal.addWidget(panel_foto)
+        self.viewLayout.addLayout(fila_principal)
 
         self.lbl_estado = CaptionLabel("")
         self.lbl_estado.setWordWrap(True)
         self.viewLayout.addWidget(self.lbl_estado)
-
-        # --- Estado del alumno (solo en edición) ---
-        if not self._nuevo:
-            inactivo = self._alumno.get("estado") == "inactivo"
-            fila_estado = QHBoxLayout()
-            lbl_est = CaptionLabel(
-                "Estado: inactivo (no se reconoce ni se lista)"
-                if inactivo else "Estado: activo")
-            self.btn_estado = PushButton("Reactivar" if inactivo else "Dar de baja…")
-            self.btn_estado.clicked.connect(self._cambiar_estado)
-            fila_estado.addWidget(lbl_est)
-            fila_estado.addStretch(1)
-            fila_estado.addWidget(self.btn_estado)
-            self.viewLayout.addLayout(fila_estado)
 
         # --- Botones Fluent del MessageBoxBase ---
         self.yesButton.setText("Guardar")
@@ -262,8 +301,8 @@ class DialogoAlumno(MessageBoxBase):
 
     # ---------------- Preview de imagen ----------------
     def _texto_preview(self, texto):
-        self.lbl_imagen.setText(texto)
         self.lbl_imagen.setPixmap(QPixmap())
+        self.lbl_imagen.setText(texto)
 
     def _mostrar_preview(self, img):
         pix = ndarray_a_pixmap(img).scaled(
@@ -341,7 +380,7 @@ class DialogoAlumno(MessageBoxBase):
         email = self.edit_email.text().strip()
         tutor = self.edit_tutor.text().strip()
         tutor_tel = self.edit_tutor_tel.text().strip()
-        condicion = self.combo_condicion.currentText().strip()
+        condicion = self.combo_condicion.currentText().strip().lower()
         observaciones = self.edit_observaciones.toPlainText().strip()
         extra = dict(apellidos=apellidos, dni=dni,
                      telefono=telefono, email=email, tutor_nombre=tutor,

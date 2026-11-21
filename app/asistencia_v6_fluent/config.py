@@ -187,6 +187,47 @@ def secciones_de_curso(cfg, curso):
     return []
 
 
+def renombrar_curso(cfg, viejo, nuevo):
+    """Renombra un curso en cfg['cursos'], cfg['horarios'] y cfg['camaras']."""
+    viejo = str(viejo or "").strip()
+    nuevo = str(nuevo or "").strip()
+    if not viejo or not nuevo or viejo == nuevo:
+        return
+    for c in cfg.get("cursos", []) or []:
+        if str(c.get("nombre", "") or "").strip() == viejo:
+            c["nombre"] = nuevo
+    for h in cfg.get("horarios", []) or []:
+        if str(h.get("curso", "") or "").strip() == viejo:
+            h["curso"] = nuevo
+    for cam in cfg.get("camaras", []) or []:
+        if str(cam.get("curso", "") or "").strip() == viejo:
+            cam["curso"] = nuevo
+
+
+def renombrar_seccion(cfg, curso, vieja, nueva):
+    """Renombra una sección dentro de un curso y actualiza sus horarios."""
+    curso = str(curso or "").strip()
+    vieja = str(vieja or "").strip()
+    nueva = str(nueva or "").strip()
+    if not curso or not vieja or not nueva or vieja == nueva:
+        return
+    for c in cfg.get("cursos", []) or []:
+        if str(c.get("nombre", "") or "").strip() == curso:
+            secs = [str(s).strip() for s in (c.get("secciones") or []) if str(s).strip()]
+            reemplazo = []
+            for s in secs:
+                val = nueva if s == vieja else s
+                if val not in reemplazo:
+                    reemplazo.append(val)
+            c["secciones"] = reemplazo
+    for h in cfg.get("horarios", []) or []:
+        if str(h.get("curso", "") or "").strip() == curso:
+            sec = str(h.get("seccion") or h.get("grupo") or "").strip()
+            if sec == vieja:
+                h["seccion"] = nueva
+                h.pop("grupo", None)
+
+
 # ---------------- Horarios de clase ----------------
 # Cada franja: {"id": "h1", "nombre": "Clase manana", "curso": "6A",
 #               "seccion": "" (todas) | "C1", "dias": [0..6] (0=lunes),

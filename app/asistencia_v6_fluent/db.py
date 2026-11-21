@@ -300,7 +300,7 @@ def obtener_estado_fecha(fecha):
                 WHERE p.alumno_id=a.alumno_id AND p.fecha=?) as minutos
         FROM alumnos a
         WHERE a.estado='activo'
-        ORDER BY a.nombre
+        ORDER BY a.apellidos, a.nombre
     """, (fecha, fecha, fecha, fecha))
     rows = [dict(r) for r in cur.fetchall()]
     con.close()
@@ -349,7 +349,7 @@ def obtener_historial_rango(fecha_ini, fecha_fin):
     con = _conectar()
     cur = con.cursor()
     cur.execute("""
-        SELECT a.alumno_id, a.nombre,
+        SELECT a.alumno_id, a.nombre, a.apellidos,
                date(x.entrada) AS fecha,
                MIN(x.entrada) AS entrada,
                (SELECT MAX(x2.salida) FROM asistencia x2

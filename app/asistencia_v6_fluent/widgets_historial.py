@@ -12,14 +12,14 @@ como "x" o "·"). La lógica de datos vive en ventana_principal.py.
 import os, sys
 from datetime import datetime
 
-from PyQt6.QtCore import Qt, QRectF, QSize
-from PyQt6.QtGui import QColor, QFont, QIcon, QPainter, QPainterPath, QPixmap, QImage
+from PyQt6.QtCore import Qt, QRect, QRectF, QSize
+from PyQt6.QtGui import QColor, QFont, QIcon, QPainter, QPainterPath, QPixmap, QImage, QBrush
 from PyQt6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QWidget, QHeaderView, QTableWidgetItem, QLabel,
 )
 from qfluentwidgets import (
     CardWidget, SubtitleLabel, BodyLabel, CaptionLabel, StrongBodyLabel,
-    TransparentToolButton, IconWidget, InfoBadge, TableWidget,
+    TransparentToolButton, IconWidget, InfoBadge, TableWidget, TableItemDelegate,
     isDarkTheme, FluentIcon as FIcon,
 )
 
@@ -54,15 +54,16 @@ def _etiqueta_dia(fecha_iso):
         return str(fecha_iso)[5:]
 
 
-def badge_estado(estado, parent=None):
-    """InfoBadge con el color según el estado."""
+def badge_estado(estado, cantidad=None, parent=None):
+    """InfoBadge con el color y conteo opcional según el estado."""
+    etiqueta = f"{estado} · {cantidad}" if cantidad is not None else (estado or "—")
     if estado == "Presente":
-        return InfoBadge.success(estado, parent=parent)
+        return InfoBadge.success(etiqueta, parent=parent)
     if estado == "Tardanza":
-        return InfoBadge.warning(estado, parent=parent)
+        return InfoBadge.warning(etiqueta, parent=parent)
     if estado == "Ausente":
-        return InfoBadge.error(estado, parent=parent)
-    return InfoBadge.custom(estado or "—", QColor("#e4e4e7"),
+        return InfoBadge.error(etiqueta, parent=parent)
+    return InfoBadge.custom(etiqueta, QColor("#e4e4e7"),
                             QColor("#3f3f46"), parent=parent)
 
 
@@ -124,9 +125,9 @@ def _tooltip_celda(celda):
 
 
 def _icono_estado(estado, color):
-    """QIcon de un estado con el color dado (caché por estado)."""
+    """QIcon de un estado con el color dado."""
     base = _ICONOS.get(estado, FIcon.REMOVE)
-    return base.icon(color)
+    return base.icon(color=color)
 
 
 def _avatar_pixmap(ruta, size=32):
@@ -162,30 +163,75 @@ def _avatar_pixmap(ruta, size=32):
     return pix
 
 
+class _DelegadoCeldaHistorial(TableItemDelegate):
+    """Dibuja fondo, texto o icono estrictamente centrados en columnas de días."""
+
+    def paint(self, painter, option, index):
+        if index.column() == 0:
+            super().paint(painter, option, index)
+            return
+
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        rect = option.rect.adjusted(2, 3, -2, -3)
+
+        fondo = index.data(Qt.ItemDataRole.BackgroundRole)
+        if isinstance(fondo, QBrush):
+            painter.setBrush(fondo)
+        elif isinstance(fondo, QColor):
+            painter.setBrush(QBrush(fondo))
+        else:
+            painter.setBrush(QColor(139, 151, 168, 16))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawRoundedRect(rect, 6, 6)
+
+        texto = index.data(Qt.ItemDataRole.DisplayRole)
+        icono = index.data(Qt.ItemDataRole.DecorationRole)
+        if texto:
+            fuente = index.data(Qt.ItemDataRole.FontRole) or option.font
+            painter.setFont(fuente)
+            fg = index.data(Qt.ItemDataRole.ForegroundRole)
+            color = fg.color() if isinstance(fg, QBrush) else (
+                fg if isinstance(fg, QColor) else QColor("#e6edf3"))
+            painter.setPen(color)
+            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, str(texto))
+        elif isinstance(icono, QIcon) and not icono.isNull():
+            tam = 15
+            icono_rect = QRect(0, 0, tam, tam)
+            icono_rect.moveCenter(rect.center())
+            icono.paint(painter, icono_rect, Qt.AlignmentFlag.AlignCenter)
+
+        painter.restore()
+
+
 class FilaNombre(QWidget):
-    """Celda de nombre: foto redondeada + nombre + % de asistencia."""
+    """Celda de nombre: foto redondeada + apellidos, nombres + % de asistencia."""
 
     def __init__(self, info, parent=None):
         super().__init__(parent)
         self.setStyleSheet("background: transparent;")
         h = QHBoxLayout(self)
-        h.setContentsMargins(6, 3, 4, 3)
-        h.setSpacing(8)
+        h.setContentsMargins(8, 6, 8, 6)
+        h.setSpacing(10)
 
         foto = QLabel(self)
-        foto.setPixmap(_avatar_pixmap(info.get("foto"), 30))
-        foto.setFixedSize(32, 32)
+        foto.setPixmap(_avatar_pixmap(info.get("foto"), 32))
+        foto.setFixedSize(34, 34)
         foto.setAlignment(Qt.AlignmentFlag.AlignCenter)
         h.addWidget(foto, 0, Qt.AlignmentFlag.AlignVCenter)
 
         col = QVBoxLayout()
         col.setContentsMargins(0, 0, 0, 0)
-        col.setSpacing(0)
+        col.setSpacing(2)
         nombre = info.get("nombre", "") or "Sin nombre"
-        lbl = BodyLabel(nombre, self)
+        lbl = BodyLabel(self)
         f = QFont()
         f.setWeight(QFont.Weight.DemiBold)
         lbl.setFont(f)
+        lbl.setText(lbl.fontMetrics().elidedText(
+            nombre, Qt.TextElideMode.ElideRight, 240))
+        lbl.setWordWrap(False)
+        lbl.setToolTip(_tooltip_alumno(info))
         col.addWidget(lbl)
         pct = info.get("porcentaje")
         txt = f"{round(pct * 100)}% de asistencias" if pct is not None \
@@ -209,8 +255,8 @@ class TablaSeccion(QWidget):
         self.detalles = bool(detalles)
 
         v = QVBoxLayout(self)
-        v.setContentsMargins(16, 8, 16, 4)
-        v.setSpacing(4)
+        v.setContentsMargins(16, 10, 16, 10)
+        v.setSpacing(8)
 
         cab = QHBoxLayout()
         lbl = StrongBodyLabel(
@@ -224,27 +270,36 @@ class TablaSeccion(QWidget):
         v.addLayout(cab)
 
         self.tabla = TableWidget(self)
+        self.tabla.setItemDelegate(_DelegadoCeldaHistorial(self.tabla))
         self.tabla.setRowCount(len(self.filas))
         self.tabla.setColumnCount(len(self.dias) + 1)
         self.tabla.setHorizontalHeaderLabels(
             ["Alumno"] + [_etiqueta_dia(f) for f in self.dias])
+        self.tabla.horizontalHeaderItem(0).setTextAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         for c, fecha in enumerate(self.dias, start=1):
-            self.tabla.horizontalHeaderItem(c).setToolTip(fecha_legible(fecha))
+            item_h = self.tabla.horizontalHeaderItem(c)
+            item_h.setToolTip(fecha_legible(fecha))
+            item_h.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         self.tabla.verticalHeader().setVisible(False)
         self.tabla.setEditTriggers(TableWidget.EditTrigger.NoEditTriggers)
         self.tabla.setSelectionMode(TableWidget.SelectionMode.NoSelection)
         self.tabla.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.tabla.setAlternatingRowColors(False)
-        self.tabla.verticalHeader().setDefaultSectionSize(44)
+        self.tabla.verticalHeader().setDefaultSectionSize(50)
 
         hdr = self.tabla.horizontalHeader()
-        hdr.setMinimumHeight(30)
-        # la columna de alumno absorbe el ancho sobrante: la matriz usa todo
-        # el espacio de la tarjeta; con muchos dias aparece scroll horizontal
-        hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        hdr.setMinimumSectionSize(46)
-        self.tabla.setColumnWidth(0, max(240, self.tabla.columnWidth(0)))
+        hdr.setMinimumHeight(34)
         ancho_dia = 76 if self.detalles else 48
+        # Con pocos días la columna Alumno absorbe el espacio sobrante; con muchos días
+        # conserva un ancho cómodo para mostrar Apellidos, Nombres sin aplastarse.
+        if len(self.dias) * ancho_dia > 680:
+            hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+            self.tabla.setColumnWidth(0, 305)
+        else:
+            hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+            hdr.setMinimumSectionSize(48)
+            self.tabla.setColumnWidth(0, 305)
         for c in range(1, len(self.dias) + 1):
             hdr.setSectionResizeMode(c, QHeaderView.ResizeMode.Fixed)
             self.tabla.setColumnWidth(c, ancho_dia)
@@ -268,7 +323,7 @@ class TablaSeccion(QWidget):
         """Fija la altura de la tabla a su contenido (sin scroll vertical)."""
         hdr = self.tabla.horizontalHeader()
         alto = max(hdr.height(), hdr.minimumHeight()) \
-            + len(self.filas) * 44 + 14
+            + len(self.filas) * 50 + 16
         self.tabla.setFixedHeight(alto)
 
     def _item_celda(self, celda, oscuro):
@@ -314,13 +369,13 @@ class TarjetaGrupoCurso(CardWidget):
         cabecera = QWidget()
         cabecera.setStyleSheet("background: transparent;")
         h = QHBoxLayout(cabecera)
-        h.setContentsMargins(16, 10, 16, 8)
+        h.setContentsMargins(16, 12, 16, 10)
         h.setSpacing(10)
         self.btn_chevron = TransparentToolButton(FIcon.CARE_UP_SOLID, cabecera)
         self.btn_chevron.clicked.connect(self.alternar)
         h.addWidget(self.btn_chevron)
         col = QVBoxLayout()
-        col.setSpacing(0)
+        col.setSpacing(2)
         self.lbl_curso = SubtitleLabel(str(curso) or "(sin curso)", cabecera)
         self.lbl_sub = CaptionLabel(subtitulo, cabecera)
         col.addWidget(self.lbl_curso)
@@ -328,14 +383,14 @@ class TarjetaGrupoCurso(CardWidget):
         h.addLayout(col, 1)
         for texto, n in conteos:
             h.addSpacing(6)
-            h.addWidget(badge_estado(texto, cabecera))
+            h.addWidget(badge_estado(texto, n, cabecera), 0, Qt.AlignmentFlag.AlignVCenter)
         v.addWidget(cabecera)
 
         self.cuerpo = QWidget()
         self.cuerpo.setStyleSheet("background: transparent;")
         self.v_cuerpo = QVBoxLayout(self.cuerpo)
-        self.v_cuerpo.setContentsMargins(6, 0, 6, 10)
-        self.v_cuerpo.setSpacing(6)
+        self.v_cuerpo.setContentsMargins(8, 2, 8, 12)
+        self.v_cuerpo.setSpacing(8)
         v.addWidget(self.cuerpo)
 
     def alternar(self, *_):
@@ -351,8 +406,8 @@ class EstadoVacioHistorial(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         v = QVBoxLayout(self)
-        v.setContentsMargins(0, 28, 0, 28)
-        v.setSpacing(8)
+        v.setContentsMargins(24, 48, 24, 48)
+        v.setSpacing(10)
         v.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         icono = IconWidget(FIcon.HISTORY, self)

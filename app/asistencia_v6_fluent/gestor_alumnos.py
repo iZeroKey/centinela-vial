@@ -398,3 +398,85 @@ def completar_embeddings():
     mensaje = (f"{len(alumnos)} alumnos activos: {procesados} embeddings nuevos, "
                f"{fallos} sin poder procesar (sin foto o sin cara detectable).")
     return True, mensaje
+
+
+def contar_por_curso_seccion():
+    """Devuelve ({curso: n}, {(curso, seccion): n}) de alumnos activos."""
+    por_curso = {}
+    por_seccion = {}
+    for a in listar():
+        insc = [i for i in (a.get("inscripciones") or [])
+                if isinstance(i, dict) and str(i.get("curso", "") or "").strip()]
+        if not insc and str(a.get("curso", "") or "").strip():
+            insc = [{"curso": str(a.get("curso", "")).strip(),
+                     "seccion": str(a.get("seccion", "") or "").strip()}]
+        vistos_curso = set()
+        for i in insc:
+            c = str(i.get("curso", "") or "").strip()
+            s = str(i.get("seccion", "") or "").strip()
+            if c and c not in vistos_curso:
+                por_curso[c] = por_curso.get(c, 0) + 1
+                vistos_curso.add(c)
+            if c and s:
+                por_seccion[(c, s)] = por_seccion.get((c, s), 0) + 1
+    return por_curso, por_seccion
+
+
+def renombrar_curso(viejo, nuevo):
+    """Actualiza el nombre de un curso en las inscripciones de todos los alumnos."""
+    viejo = str(viejo or "").strip()
+    nuevo = str(nuevo or "").strip()
+    if not viejo or not nuevo or viejo == nuevo:
+        return 0
+    modificados = 0
+    with _lock_json:
+        data = _leer_json()
+        for a in data.get("alumnos", []):
+            cambio = False
+            for i in (a.get("inscripciones") or []):
+                if isinstance(i, dict) and str(i.get("curso", "") or "").strip() == viejo:
+                    i["curso"] = nuevo
+                    cambio = True
+            if str(a.get("curso", "") or "").strip() == viejo:
+                a["curso"] = nuevo
+                cambio = True
+            if cambio:
+                _normalizar_inscripciones(a)
+                modificados += 1
+        if modificados:
+            _escribir_json(data)
+    if modificados:
+        _sincronizar()
+    return modificados
+
+
+def renombrar_seccion(curso, vieja, nueva):
+    """Actualiza el nombre de una sección para un curso en alumnos.json."""
+    curso = str(curso or "").strip()
+    vieja = str(vieja or "").strip()
+    nueva = str(nueva or "").strip()
+    if not curso or not vieja or not nueva or vieja == nueva:
+        return 0
+    modificados = 0
+    with _lock_json:
+        data = _leer_json()
+        for a in data.get("alumnos", []):
+            cambio = False
+            for i in (a.get("inscripciones") or []):
+                if (isinstance(i, dict)
+                        and str(i.get("curso", "") or "").strip() == curso
+                        and str(i.get("seccion", "") or "").strip() == vieja):
+                    i["seccion"] = nueva
+                    cambio = True
+            if (str(a.get("curso", "") or "").strip() == curso
+                    and str(a.get("seccion", "") or "").strip() == vieja):
+                a["seccion"] = nueva
+                cambio = True
+            if cambio:
+                _normalizar_inscripciones(a)
+                modificados += 1
+        if modificados:
+            _escribir_json(data)
+    if modificados:
+        _sincronizar()
+    return modificados
