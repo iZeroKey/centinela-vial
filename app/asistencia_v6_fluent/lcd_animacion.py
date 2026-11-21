@@ -54,6 +54,17 @@ def _pad(texto):
     return str(texto or "")[:16].ljust(16)
 
 
+def _num_camara(camara):
+    s = _ascii(camara).strip()
+    if not s:
+        return "1"
+    # Extraer digitos; si no hay, usar primer caracter.
+    digs = "".join(ch for ch in s if ch.isdigit())
+    if digs:
+        return digs[:2]
+    return s[:1]
+
+
 def _centrar(texto):
     t = _ascii(texto).strip()[:16]
     if len(t) >= 16:
@@ -164,15 +175,16 @@ def obtener_filas_animadas(cfg=None, ahora=None):
     # ---------------- Esperando ----------------
     if estado == "esperando":
         l1 = _centrar("CENTINELA CTRL")
+        num = _num_camara(datos.get("camara"))
         frames_l2 = [
-            "ESPERANDO [>   ]",
-            "ESPERANDO [ >  ]",
-            "ESPERANDO [  > ]",
-            "ESPERANDO [   >]",
-            "ESPERANDO [   <]",
-            "ESPERANDO [  < ]",
-            "ESPERANDO [ <  ]",
-            "ESPERANDO [<   ]",
+            f"ESPERANDO [{num}>  ]",
+            f"ESPERANDO [ {num}> ]",
+            f"ESPERANDO [  {num}>]",
+            f"ESPERANDO [   {num}]",
+            f"ESPERANDO [  {num}<]",
+            f"ESPERANDO [ {num}< ]",
+            f"ESPERANDO [{num}<  ]",
+            f"ESPERANDO [{num}   ]",
         ]
         iv = _intervalo(0.45, velocidad)
         idx = _idx_frame(t, iv, len(frames_l2))

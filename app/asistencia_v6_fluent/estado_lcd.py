@@ -56,6 +56,7 @@ _estado = {
     "progreso": 0.0,
     "incompleto": False,
     "motivo": "",
+    "camara": "",
     "actualizado_en": "",
     "fila_1": "".ljust(LCD_ANCHO),
     "fila_2": "".ljust(LCD_ANCHO),
@@ -100,7 +101,7 @@ def _filas_para(estado, nombre, apellidos, progreso, motivo):
     return _linea(fila_1), _linea(fila_2)
 
 
-def _publicar(estado, nombre="", apellidos="", progreso=0.0, motivo="", _forzar=False):
+def _publicar(estado, nombre="", apellidos="", progreso=0.0, motivo="", camara="", _forzar=False):
     global _resultado_hasta, _pendiente_args, _timer_resultado
 
     progreso = _progreso_0_100(progreso)
@@ -111,7 +112,7 @@ def _publicar(estado, nombre="", apellidos="", progreso=0.0, motivo="", _forzar=
         # Si hay un resultado visible y llega un estado no-resultado, encolarlo
         # para no sobrescribir el OK instantáneamente.
         if not _forzar and not es_resultado and ahora < _resultado_hasta:
-            _pendiente_args = (estado, nombre, apellidos, progreso, motivo)
+            _pendiente_args = (estado, nombre, apellidos, progreso, motivo, camara)
             if _timer_resultado is None:
                 delay = max(0.0, _resultado_hasta - ahora)
 
@@ -148,6 +149,7 @@ def _publicar(estado, nombre="", apellidos="", progreso=0.0, motivo="", _forzar=
         "progreso": progreso,
         "incompleto": estado == "incompleto",
         "motivo": str(motivo or "").strip(),
+        "camara": str(camara or "").strip(),
         "actualizado_en": datetime.now().isoformat(timespec="seconds"),
         "fila_1": fila_1,
         "fila_2": fila_2,
@@ -161,29 +163,29 @@ def _publicar(estado, nombre="", apellidos="", progreso=0.0, motivo="", _forzar=
 
 
 # Publicadores: los usa la integración de la app, no el firmware de la cámara.
-def actualizar_esperando(mensaje="ESPERANDO..."):
+def actualizar_esperando(mensaje="ESPERANDO...", camara=""):
     """Publica que no hay un reconocimiento activo."""
-    _publicar("esperando", motivo=mensaje)
+    _publicar("esperando", motivo=mensaje, camara=camara)
 
 
-def actualizar_procesamiento(nombre="", apellidos="", progreso=0.0):
+def actualizar_procesamiento(nombre="", apellidos="", progreso=0.0, camara=""):
     """Publica el progreso actual de un estudiante identificado parcialmente."""
-    _publicar("procesando", nombre, apellidos, progreso)
+    _publicar("procesando", nombre, apellidos, progreso, camara=camara)
 
 
-def actualizar_confirmado(nombre="", apellidos=""):
+def actualizar_confirmado(nombre="", apellidos="", camara=""):
     """Publica una identificación confirmada."""
-    _publicar("confirmado", nombre, apellidos, 100.0)
+    _publicar("confirmado", nombre, apellidos, 100.0, camara=camara)
 
 
-def actualizar_incompleto(nombre="", apellidos="", motivo="INCOMPLETO"):
+def actualizar_incompleto(nombre="", apellidos="", motivo="INCOMPLETO", camara=""):
     """Publica un reconocimiento que no alcanzó la confirmación."""
-    _publicar("incompleto", nombre, apellidos, 0.0, motivo)
+    _publicar("incompleto", nombre, apellidos, 0.0, motivo, camara=camara)
 
 
-def actualizar_desconocido(mensaje="INTENTE DE NUEVO"):
+def actualizar_desconocido(mensaje="INTENTE DE NUEVO", camara=""):
     """Publica que el rostro no pudo asociarse a un estudiante."""
-    _publicar("desconocido", motivo=mensaje)
+    _publicar("desconocido", motivo=mensaje, camara=camara)
 
 
 # Getters sin argumentos: esta es la interfaz que consumirá la integración LCD.

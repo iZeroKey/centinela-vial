@@ -1298,7 +1298,7 @@ class VentanaPrincipal(FluentWindow):
             and alumno_id == self._lcd_alumno_confirmado
         )
         if es_prioritario and not ya_confirmado:
-            estado_lcd.actualizar_procesamiento(nombre=nombre, progreso=progreso)
+            estado_lcd.actualizar_procesamiento(nombre=nombre, progreso=progreso, camara=cam_id)
             self._actualizar_simulador_lcd()
             self._lcd_track_prioritario = (cam_id, track_id)
             self._lcd_area_prioritaria = area
@@ -1331,7 +1331,7 @@ class VentanaPrincipal(FluentWindow):
         if cam_id not in self.hilos and cam_id not in self.hilos_telefono:
             return  # fuente detenida: descartar senales en transito
         # Un confirmado tiene prioridad máxima en el LCD.
-        estado_lcd.actualizar_confirmado(nombre=nombre)
+        estado_lcd.actualizar_confirmado(nombre=nombre, camara=cam_id)
         self._actualizar_simulador_lcd()
         self._lcd_track_prioritario = (cam_id, track_id)
         self._lcd_area_prioritaria = float("inf")
@@ -1428,7 +1428,7 @@ class VentanaPrincipal(FluentWindow):
                     self.layout_rostros.takeAt(i)
                     break
         if not self.filas_progreso:
-            estado_lcd.actualizar_esperando()
+            estado_lcd.actualizar_esperando(camara=cam_id)
             self._actualizar_simulador_lcd()
             self.lbl_sin_rostros.show()
 
