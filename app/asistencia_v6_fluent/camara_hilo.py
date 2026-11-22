@@ -385,8 +385,12 @@ class CamaraHilo(QThread):
         # subidos por HTTP (servidor_web). Mismo pipeline y misma logica de
         # confirmacion que una camara fisica.
         self._es_telefono = isinstance(fuente, str) and fuente.startswith("telefono:")
-        self._cola_telefono = queue.Queue(maxsize=2)
+        self._cola_telefono = queue.Queue(maxsize=1)
         self._ultimo_frame_ts = 0.0
+        self._ultimo_frame_display = None
+        self._lock_dets_tel = threading.Lock()
+        self._dets_tel_norm = []
+        self._dets_tel_seq = 0
 
     # ---------------- Referencias en caliente ----------------
     def set_referencias(self, nuevas):
@@ -404,8 +408,12 @@ class CamaraHilo(QThread):
         self._tracks = {}
         self._next_track_id = 0
         self._ultimo_frame = None
+        self._ultimo_frame_display = None
         self._ultimo_frame_ts = 0.0
         self._ultimas_detecciones = []
+        with self._lock_dets_tel:
+            self._dets_tel_norm = []
+            self._dets_tel_seq = 0
         self._suavizador.limpiar()
         self._mjpeg_buf = b""
         self._intentos_reconexion = 0
@@ -475,6 +483,7 @@ class CamaraHilo(QThread):
                     except Exception:
                         pass
                 self._ultimas_detecciones = dets_vis
+                self._ultimo_frame_display = mostrar
                 self.frame_listo.emit(mostrar, dets_vis)
                 self.msleep(1)
         except Exception as e:
@@ -1425,6 +1434,31 @@ class CamaraHilo(QThread):
                 "confirmado": confirmado,
             })
 
+        fw_s, fh_s = max(1, orig_w), max(1, orig_h)
+        raw_norm = []
+        for det in detecciones:
+            x1, y1, x2, y2 = det["caja"]
+            ident = bool(det["identificado"])
+            nombre_raw = str(det.get("nombre") or "").strip() if ident else "Rostro no registrado"
+            nombre_txt = nombre_raw.title() if (ident and nombre_raw.isupper()) else (nombre_raw or "Alumno")
+            raw_norm.append({
+                "id": det["alumno_id"] or "",
+                "nombre": nombre_txt,
+                "ident": ident,
+                "conf": bool(det["confirmado"]),
+                "prog": round(float(det["progreso"]), 3) if det["progreso"] is not None else None,
+                "sim": round(float(det.get("sim", 0.0)), 3),
+                "box": [
+                    round(float(x1) / fw_s, 4),
+                    round(float(y1) / fh_s, 4),
+                    round(float(x2) / fw_s, 4),
+                    round(float(y2) / fh_s, 4),
+                ],
+            })
+        with self._lock_dets_tel:
+            self._dets_tel_norm = raw_norm
+            self._dets_tel_seq += 1
+
         mostrar, detecciones_disp = self._preparar_display(anotado, detecciones)
         mh, mw = mostrar.shape[:2]
         mw_safe, mh_safe = max(1, mw), max(1, mh)
@@ -1446,11 +1480,16 @@ class CamaraHilo(QThread):
 
     @property
     def frame_actual(self):
-        return self._ultimo_frame
+        return self._ultimo_frame_display if self._ultimo_frame_display is not None else self._ultimo_frame
+
+    def ultimas_detecciones_tel(self):
+        """Últimas detecciones normalizadas al frame crudo del teléfono (thread-safe)."""
+        with self._lock_dets_tel:
+            return self._dets_tel_seq, list(self._dets_tel_norm)
 
     # ---------------- Modo telefono (servidor_web) ----------------
     def recibir_frame_telefono(self, frame):
-        """Encola un frame subido por el telefono. Hilo del servidor web."""
+        """Encola un frame subido por el telefono (reemplaza el anterior si está llena)."""
         # espera breve al arranque del hilo (carrera start() vs primer frame)
         fin = time.time() + 1.0
         while not self._corriendo and time.time() < fin:
@@ -1460,7 +1499,14 @@ class CamaraHilo(QThread):
         try:
             self._cola_telefono.put_nowait(frame)
         except queue.Full:
-            pass  # descarta atrasados: siempre interesa el mas reciente
+            try:
+                self._cola_telefono.get_nowait()
+            except queue.Empty:
+                pass
+            try:
+                self._cola_telefono.put_nowait(frame)
+            except queue.Full:
+                pass
         return True
 
     def esperar_frame_anotado(self, ts_enviado, timeout=0.8):

@@ -1368,9 +1368,12 @@ class VentanaPrincipal(FluentWindow):
         self._push_referencias()
 
     def _push_referencias(self):
-        """Propaga las referencias a los hilos de cámara en marcha."""
+        """Propaga las referencias a los hilos de cámara y teléfonos en marcha."""
+        refs = list(self.referencias)
         for hilo in self.hilos.values():
-            hilo.set_referencias(self.referencias)
+            hilo.set_referencias(refs)
+        for hilo in self.hilos_telefono.values():
+            hilo.set_referencias(refs)
 
     def _recargar_alumnos(self):
         if self._trabajo_recarga is not None and self._trabajo_recarga.isRunning():
@@ -1440,7 +1443,8 @@ class VentanaPrincipal(FluentWindow):
         try:
             self._servidor_web = ServidorWeb(
                 provedor_frame, provedor_estado,
-                al_frame_telefono=self._al_frame_telefono)
+                al_frame_telefono=self._al_frame_telefono,
+                al_frame_telefono_rapido=self._al_frame_telefono_rapido)
             self._servidor_web.start()
         except Exception as e:
             import traceback
@@ -1552,13 +1556,8 @@ class VentanaPrincipal(FluentWindow):
         nombre = getattr(hilo, "fuente", tel_id)
         self.mostrar_toast(f"Teléfono {nombre}: {mensaje}", "warning")
 
-    def _al_frame_telefono(self, tel_id, nombre, jpg_bytes):
-        """Foto subida por un telefono -> IA -> JPEG anotado.
-
-        Corre en el HILO DEL SERVIDOR WEB (no toca la GUI): decodifica,
-        encola el frame en el CamaraHilo virtual del telefono y espera la
-        respuesta anotada del worker de inferencia.
-        """
+    def _al_frame_telefono_rapido(self, tel_id, nombre, jpg_bytes):
+        """Decodifica y encola el frame sin esperar a la IA; devuelve (seq, dets)."""
         frame = cv2.imdecode(np.frombuffer(jpg_bytes, np.uint8),
                              cv2.IMREAD_COLOR)
         if frame is None:
@@ -1568,7 +1567,21 @@ class VentanaPrincipal(FluentWindow):
             hilo = self._crear_hilo_telefono(tel_id, nombre)
         if hilo is None:
             return None
-        hilo.set_referencias(list(self.referencias))
+        if not hilo.recibir_frame_telefono(frame):
+            return None
+        return hilo.ultimas_detecciones_tel()
+
+    def _al_frame_telefono(self, tel_id, nombre, jpg_bytes):
+        """Respaldo síncrono: foto subida -> espera IA -> JPEG anotado."""
+        frame = cv2.imdecode(np.frombuffer(jpg_bytes, np.uint8),
+                             cv2.IMREAD_COLOR)
+        if frame is None:
+            return None
+        hilo = self._hilo_asignado_para(tel_id)
+        if hilo is None:
+            hilo = self._crear_hilo_telefono(tel_id, nombre)
+        if hilo is None:
+            return None
         ts = time.time()
         if not hilo.recibir_frame_telefono(frame):
             return None
