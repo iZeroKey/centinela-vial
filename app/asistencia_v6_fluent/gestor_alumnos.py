@@ -32,11 +32,13 @@ JSON_PATH = os.path.join(BASE_DATOS, "alumnos.json")
 REF_DIR = os.path.join(BASE_DATOS, "referencia")
 
 _lock_json = threading.Lock()
+_cache_json = None
+_cache_firma = None
 
 
 # ---------------- Lectura/escritura JSON ----------------
 
-def _leer_json():
+def _leer_json_disco():
     try:
         with open(JSON_PATH, encoding="utf-8") as f:
             data = json.load(f)
@@ -47,17 +49,43 @@ def _leer_json():
     return data
 
 
+def _leer_json():
+    """Lee alumnos.json con caché en memoria validada por (mtime_ns, size)."""
+    global _cache_json, _cache_firma
+    try:
+        st = os.stat(JSON_PATH)
+        firma = (st.st_mtime_ns, st.st_size)
+    except OSError:
+        _cache_json = None
+        _cache_firma = None
+        return {"alumnos": []}
+    if _cache_json is not None and _cache_firma == firma:
+        return _cache_json
+    data = _leer_json_disco()
+    _cache_json = data
+    _cache_firma = firma
+    return data
+
+
 def _escribir_json(data):
+    global _cache_json, _cache_firma
     os.makedirs(BASE_DATOS, exist_ok=True)
     tmp = JSON_PATH + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
     os.replace(tmp, JSON_PATH)
+    _cache_json = data
+    try:
+        st = os.stat(JSON_PATH)
+        _cache_firma = (st.st_mtime_ns, st.st_size)
+    except OSError:
+        _cache_firma = None
 
 
 def _sincronizar():
     try:
-        db_centinela.sincronizar_alumnos(JSON_PATH)
+        db_centinela.sincronizar_alumnos(
+            JSON_PATH, alumnos=_leer_json().get("alumnos", []))
     except Exception as e:
         print(f"[GESTOR] sincronizar con SQLite fallo: {e}")
 
@@ -164,9 +192,11 @@ def _normalizar_inscripciones(alumno):
     Normaliza las inscripciones del alumno: lista de {"curso", "seccion"},
     un curso como maximo una vez (solo una seccion por curso).
 
-    - inscripciones ausentes -> se construyen desde curso/seccion planos.
+    - inscripciones ausentes (clave ausente o None) -> se construyen desde
+      curso/seccion planos (migración legacy).
+    - inscripciones presentes como lista (incluso []) -> fuente de verdad.
     - curso/seccion planos quedan como espejo de la primera inscripcion
-      (compatibilidad con la BD y lectores externos).
+      (o "" si no tiene inscripciones) para compatibilidad con SQLite.
     - la clave historica 'grupo' se elimina (el C1 es la seccion).
     """
     brutas = alumno.get("inscripciones")
@@ -182,7 +212,7 @@ def _normalizar_inscripciones(alumno):
             if any(x["curso"] == curso for x in norm):
                 continue   # una sola seccion por curso
             norm.append({"curso": curso, "seccion": seccion})
-    if not norm:
+    else:
         curso = str(alumno.get("curso", "") or "").strip()
         if curso:
             norm.append({"curso": curso,
@@ -191,6 +221,9 @@ def _normalizar_inscripciones(alumno):
     if norm:
         alumno["curso"] = norm[0]["curso"]
         alumno["seccion"] = norm[0]["seccion"]
+    else:
+        alumno["curso"] = ""
+        alumno["seccion"] = ""
     alumno.pop("grupo", None)
     return alumno
 
@@ -213,7 +246,7 @@ def _normalizar_alumno(alumno):
 
 def mapa_inscripciones():
     """{alumno_id: [{"curso", "seccion"}, ...]} para todo alumnos.json."""
-    return {a.get("alumno_id"): list(a.get("inscripciones") or [])
+    return {a.get("alumno_id"): _inscripciones_de_alumno(a)
             for a in _leer_json().get("alumnos", []) if a.get("alumno_id")}
 
 
@@ -237,18 +270,25 @@ def agregar(nombre, curso="", seccion="", imagen=None, ruta_imagen=None,
         return None, aviso
 
     with _lock_json:
-        data = _leer_json()
+        data = _leer_json_disco()
         alumno_id = siguiente_id(data)
         try:
             _guardar_imagen_jpg(imagen, alumno_id)
         except RuntimeError as e:
             return None, str(e)
+        if inscripciones is not None:
+            insc_init = list(inscripciones)
+        elif str(curso or "").strip():
+            insc_init = [{"curso": str(curso).strip(),
+                          "seccion": str(seccion or "").strip()}]
+        else:
+            insc_init = []
         alumno = {
             "alumno_id": alumno_id,
             "nombre": nombre,
             "curso": curso or "",
             "seccion": seccion or "",
-            "inscripciones": list(inscripciones or []),
+            "inscripciones": insc_init,
             "foto_referencia": f"referencia/{alumno_id}.jpg",
             "embedding": emb.tolist(),
             "estado": "activo",
@@ -289,7 +329,7 @@ def editar(alumno_id, nombre=None, curso=None, seccion=None,
             return False, aviso
 
     with _lock_json:
-        data = _leer_json()
+        data = _leer_json_disco()
         alumno = next((a for a in data.get("alumnos", [])
                        if a.get("alumno_id") == alumno_id), None)
         if alumno is None:
@@ -335,7 +375,7 @@ def cambiar_estado(alumno_id, estado):
     Devuelve (ok, mensaje).
     """
     with _lock_json:
-        data = _leer_json()
+        data = _leer_json_disco()
         alumno = next((a for a in data.get("alumnos", [])
                        if a.get("alumno_id") == alumno_id), None)
         if alumno is None:
@@ -367,7 +407,7 @@ def regenerar_embedding(alumno_id):
         return False, aviso
 
     with _lock_json:
-        data = _leer_json()
+        data = _leer_json_disco()
         alumno = next((a for a in data.get("alumnos", [])
                        if a.get("alumno_id") == alumno_id), None)
         if alumno is None:
@@ -400,26 +440,160 @@ def completar_embeddings():
     return True, mensaje
 
 
+def _inscripciones_de_alumno(a):
+    """Lista normalizada de inscripciones [{"curso","seccion"}] de un dict alumno."""
+    raw = a.get("inscripciones")
+    if isinstance(raw, list):
+        return [
+            {"curso": str(i.get("curso", "") or "").strip(),
+             "seccion": str(i.get("seccion", "") or "").strip()}
+            for i in raw
+            if isinstance(i, dict) and str(i.get("curso", "") or "").strip()
+        ]
+    curso = str(a.get("curso", "") or "").strip()
+    if curso:
+        return [{"curso": curso, "seccion": str(a.get("seccion", "") or "").strip()}]
+    return []
+
+
 def contar_por_curso_seccion():
     """Devuelve ({curso: n}, {(curso, seccion): n}) de alumnos activos."""
     por_curso = {}
     por_seccion = {}
     for a in listar():
-        insc = [i for i in (a.get("inscripciones") or [])
-                if isinstance(i, dict) and str(i.get("curso", "") or "").strip()]
-        if not insc and str(a.get("curso", "") or "").strip():
-            insc = [{"curso": str(a.get("curso", "")).strip(),
-                     "seccion": str(a.get("seccion", "") or "").strip()}]
+        insc = _inscripciones_de_alumno(a)
         vistos_curso = set()
         for i in insc:
-            c = str(i.get("curso", "") or "").strip()
-            s = str(i.get("seccion", "") or "").strip()
+            c = i["curso"]
+            s = i["seccion"]
             if c and c not in vistos_curso:
                 por_curso[c] = por_curso.get(c, 0) + 1
                 vistos_curso.add(c)
             if c and s:
                 por_seccion[(c, s)] = por_seccion.get((c, s), 0) + 1
     return por_curso, por_seccion
+
+
+def mapa_secciones_en_curso(curso):
+    """Devuelve {alumno_id: seccion} de alumnos activos inscritos en `curso`."""
+    curso = str(curso or "").strip()
+    if not curso:
+        return {}
+    res = {}
+    for a in listar():
+        aid = a.get("alumno_id")
+        if not aid:
+            continue
+        for i in _inscripciones_de_alumno(a):
+            if i["curso"] == curso:
+                res[aid] = i["seccion"]
+                break
+    return res
+
+
+def asignar_alumnos_seccion(curso, seccion, alumno_ids):
+    """Asigna de forma atómica los `alumno_ids` a (curso, seccion).
+
+    - Si un alumno en `alumno_ids` ya estaba en otra sección del mismo curso,
+      se mueve a `seccion` (regla: una sección por curso).
+    - Si un alumno NO está en `alumno_ids` y estaba en (curso, seccion), se
+      quita de esa sección (conservando sus demás cursos y su registro en la
+      base de alumnos).
+    - No modifica alumnos asignados a otras secciones del mismo curso.
+    Devuelve (agregados, quitados, movidos).
+    """
+    curso = str(curso or "").strip()
+    seccion = str(seccion or "").strip()
+    if not curso or not seccion:
+        return 0, 0, 0
+    objetivos = {str(aid).strip() for aid in (alumno_ids or []) if str(aid).strip()}
+    agregados = quitados = movidos = 0
+    ahora = datetime.now().isoformat()
+
+    with _lock_json:
+        data = _leer_json_disco()
+        for a in data.get("alumnos", []):
+            aid = str(a.get("alumno_id", "") or "").strip()
+            if not aid:
+                continue
+            insc = _inscripciones_de_alumno(a)
+            prev = next((i for i in insc if i["curso"] == curso), None)
+            otras = [i for i in insc if i["curso"] != curso]
+            cambio = False
+            if aid in objetivos:
+                if prev is None:
+                    a["inscripciones"] = otras + [{"curso": curso, "seccion": seccion}]
+                    agregados += 1
+                    cambio = True
+                elif prev["seccion"] != seccion:
+                    a["inscripciones"] = otras + [{"curso": curso, "seccion": seccion}]
+                    movidos += 1
+                    cambio = True
+            else:
+                if prev is not None and prev["seccion"] == seccion:
+                    a["inscripciones"] = otras
+                    quitados += 1
+                    cambio = True
+            if cambio:
+                a["actualizado_en"] = ahora
+                _normalizar_inscripciones(a)
+        if agregados or quitados or movidos:
+            _escribir_json(data)
+    if agregados or quitados or movidos:
+        _sincronizar()
+    return agregados, quitados, movidos
+
+
+def quitar_inscripciones_seccion(curso, seccion):
+    """Quita la asignación (curso, seccion) de todos los alumnos."""
+    curso = str(curso or "").strip()
+    seccion = str(seccion or "").strip()
+    if not curso or not seccion:
+        return 0
+    modificados = 0
+    ahora = datetime.now().isoformat()
+    with _lock_json:
+        data = _leer_json_disco()
+        for a in data.get("alumnos", []):
+            insc = _inscripciones_de_alumno(a)
+            nuevas = [
+                i for i in insc
+                if not (i["curso"] == curso and i["seccion"] == seccion)
+            ]
+            if len(nuevas) != len(insc):
+                a["inscripciones"] = nuevas
+                a["actualizado_en"] = ahora
+                _normalizar_inscripciones(a)
+                modificados += 1
+        if modificados:
+            _escribir_json(data)
+    if modificados:
+        _sincronizar()
+    return modificados
+
+
+def quitar_inscripciones_curso(curso):
+    """Quita todas las asignaciones de `curso` en alumnos.json."""
+    curso = str(curso or "").strip()
+    if not curso:
+        return 0
+    modificados = 0
+    ahora = datetime.now().isoformat()
+    with _lock_json:
+        data = _leer_json_disco()
+        for a in data.get("alumnos", []):
+            insc = _inscripciones_de_alumno(a)
+            nuevas = [i for i in insc if i["curso"] != curso]
+            if len(nuevas) != len(insc):
+                a["inscripciones"] = nuevas
+                a["actualizado_en"] = ahora
+                _normalizar_inscripciones(a)
+                modificados += 1
+        if modificados:
+            _escribir_json(data)
+    if modificados:
+        _sincronizar()
+    return modificados
 
 
 def renombrar_curso(viejo, nuevo):
@@ -430,7 +604,7 @@ def renombrar_curso(viejo, nuevo):
         return 0
     modificados = 0
     with _lock_json:
-        data = _leer_json()
+        data = _leer_json_disco()
         for a in data.get("alumnos", []):
             cambio = False
             for i in (a.get("inscripciones") or []):
@@ -459,7 +633,7 @@ def renombrar_seccion(curso, vieja, nueva):
         return 0
     modificados = 0
     with _lock_json:
-        data = _leer_json()
+        data = _leer_json_disco()
         for a in data.get("alumnos", []):
             cambio = False
             for i in (a.get("inscripciones") or []):

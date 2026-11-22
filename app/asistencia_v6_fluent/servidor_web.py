@@ -413,12 +413,15 @@ class ServidorWeb:
         self._zeroconf = None
         self._info = None
         self._lock = threading.Lock()
+        self._mdns_lock = threading.Lock()
+        self._detenido = False
 
     # -- ciclo de vida -------------------------------------------------------
     def start(self):
         with self._lock:
             if self._server is not None:
                 return
+            self._detenido = False
             generar_certificado()
             # staticmethod: si se asignara la funcion pelada como atributo de
             # clase, el handler la llamaria con self (metodo enlazado)
@@ -438,12 +441,18 @@ class ServidorWeb:
                 kwargs={"poll_interval": 0.5},
                 name="servidor-web", daemon=True)
             self._hilo.start()
-            self._anunciar_mdns()
+            # El registro mDNS sondea la red (~3 s); se lanza en segundo plano
+            # para no bloquear el arranque de la ventana.
+            threading.Thread(
+                target=self._anunciar_mdns,
+                name="mdns-anuncio", daemon=True,
+            ).start()
             print(f"[WEB] https://{NOMBRE_MDNS}.local:{PUERTO_HTTPS} "
                   f"(o https://{ip_local()}:{PUERTO_HTTPS})")
 
     def detener(self):
         with self._lock:
+            self._detenido = True
             server, hilo = self._server, self._hilo
             self._server, self._hilo = None, None
         if server is not None:
@@ -467,10 +476,10 @@ class ServidorWeb:
                   "(use la IP o instale zeroconf)")
             return
         try:
-            self._zeroconf = zc = Zeroconf()
+            zc = Zeroconf()
             import ipaddress
             addr = ipaddress.ip_address(ip_local())
-            self._info = ServiceInfo(
+            info = ServiceInfo(
                 "_http._tcp.local.",
                 f"{NOMBRE_MDNS}._http._tcp.local.",
                 port=PUERTO_HTTPS,
@@ -478,8 +487,14 @@ class ServidorWeb:
                 server=f"{NOMBRE_MDNS}.local.",
                 addresses=[addr.packed],
             )
+            with self._mdns_lock:
+                if self._detenido:
+                    zc.close()
+                    return
+                self._zeroconf = zc
+                self._info = info
             try:
-                zc.register_service(self._info)
+                zc.register_service(info)
                 print("[MDNS] anunciado centinela.local")
             except NonUniqueNameException:
                 print("[MDNS] centinela.local ya anunciado por otro equipo; "
@@ -489,17 +504,19 @@ class ServidorWeb:
             self._retirar_mdns()
 
     def _retirar_mdns(self):
-        if self._zeroconf is not None:
-            try:
-                if self._info is not None:
-                    self._zeroconf.unregister_service(self._info)
-            except Exception:
-                pass
-            try:
-                self._zeroconf.close()
-            except Exception:
-                pass
+        with self._mdns_lock:
+            zc, info = self._zeroconf, self._info
             self._zeroconf, self._info = None, None
+        if zc is not None:
+            try:
+                if info is not None:
+                    zc.unregister_service(info)
+            except Exception:
+                pass
+            try:
+                zc.close()
+            except Exception:
+                pass
 
     # -- politicas de telefonos (Fase 1c) ------------------------------------
     ESTADOS_TELEFONO = ("libre", "controles_ocultos", "bloqueado")

@@ -2,11 +2,11 @@
 """
 Centinela Control — Diálogo de alta/edición de alumnos (v6)
 
-Datos + inscripciones (lista de curso·seccion; un curso solo puede
-aparecer una vez) + imagen. La imagen puede capturarse con una cámara
-configurada o elegirse de un fichero. Al guardar, un trabajo en segundo
-plano valida la cara, regenera el embedding y sincroniza JSON + SQLite
-vía gestor_alumnos; la UI no se congela.
+Gestiona exclusivamente la ficha personal del alumno y su foto facial.
+La asignación de alumnos a cursos y secciones se realiza desde la pestaña
+«Cursos y horarios». Al guardar, un trabajo en segundo plano valida la cara,
+regenera el embedding y sincroniza JSON + SQLite vía gestor_alumnos; la UI
+no se congela.
 
 Los IDs de alumno son internos y no se muestran.
 
@@ -24,7 +24,7 @@ from PyQt6.QtWidgets import (
 from qfluentwidgets import (
     LineEdit, PushButton, ComboBox, TextEdit,
     MessageBoxBase, SubtitleLabel, CaptionLabel, ScrollArea, isDarkTheme,
-    TransparentToolButton, FluentIcon as FIcon,
+    FluentIcon as FIcon,
 )
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -72,8 +72,6 @@ class DialogoAlumno(MessageBoxBase):
         self.edit_dni.setClearButtonEnabled(True)
         self.edit_dni.setText(self._alumno.get("dni", "") or "")
 
-        self._cfg = config_app.cargar()
-
         self.edit_telefono = LineEdit()
         self.edit_telefono.setPlaceholderText("Ej. 987 654 321 (opcional)")
         self.edit_telefono.setText(self._alumno.get("telefono", "") or "")
@@ -112,37 +110,11 @@ class DialogoAlumno(MessageBoxBase):
         cuerpo = QWidget()
         cuerpo.setStyleSheet("background: transparent;")
         form = QVBoxLayout(cuerpo)
-        form.setSpacing(10)
-        form.setContentsMargins(0, 4, 12, 4)
+        form.setSpacing(8)
+        form.setContentsMargins(0, 4, 10, 4)
         form.addLayout(fila("Nombre:", self.edit_nombre))
         form.addLayout(fila("Apellidos:", self.edit_apellidos))
         form.addLayout(fila("DNI:", self.edit_dni))
-
-        # ---- Inscripciones: varios cursos, una sección por curso ----
-        lbl_insc = CaptionLabel("Cursos y secciones:")
-        form.addWidget(lbl_insc)
-        self._filas_insc = []   # (contenedor, combo_curso, combo_seccion)
-        self._v_insc = QVBoxLayout()
-        self._v_insc.setSpacing(6)
-        form.addLayout(self._v_insc)
-        btn_add_insc = PushButton(FIcon.ADD, "Agregar curso")
-        btn_add_insc.setObjectName("secundario")
-        btn_add_insc.setMinimumHeight(30)
-        btn_add_insc.clicked.connect(self._agregar_inscripcion)
-        fila_add = QHBoxLayout()
-        fila_add.addStretch(1)
-        fila_add.addWidget(btn_add_insc)
-        form.addLayout(fila_add)
-        insc_previas = self._alumno.get("inscripciones") or []
-        if not insc_previas and str(self._alumno.get("curso", "") or "").strip():
-            insc_previas = [{"curso": self._alumno.get("curso", ""),
-                             "seccion": self._alumno.get("seccion", "")}]
-        for insc in insc_previas:
-            self._agregar_inscripcion(
-                str(insc.get("curso", "") or ""), str(insc.get("seccion", "") or ""))
-        if not self._filas_insc:
-            self._agregar_inscripcion()
-
         form.addLayout(fila("Teléfono:", self.edit_telefono))
         form.addLayout(fila("Email:", self.edit_email))
         form.addLayout(fila("Tutor:", self.edit_tutor))
@@ -156,7 +128,7 @@ class DialogoAlumno(MessageBoxBase):
         scroll.setStyleSheet(
             "QScrollArea { border: none; background: transparent; }"
             " QScrollArea > QWidget > QWidget { background: transparent; }")
-        scroll.setMinimumHeight(380)
+        scroll.setMinimumHeight(390)
 
         # --- Panel derecho: Foto + acciones ---
         oscuro = isDarkTheme()
@@ -213,8 +185,15 @@ class DialogoAlumno(MessageBoxBase):
         fila_principal.addWidget(panel_foto)
         self.viewLayout.addLayout(fila_principal)
 
+        nota_cursos = CaptionLabel(
+            "La asignación a cursos y secciones se gestiona desde «Cursos y horarios».")
+        nota_cursos.setWordWrap(True)
+        nota_cursos.setStyleSheet("color: rgba(139, 151, 168, 0.9);")
+        self.viewLayout.addWidget(nota_cursos)
+
         self.lbl_estado = CaptionLabel("")
         self.lbl_estado.setWordWrap(True)
+        self.lbl_estado.setVisible(False)
         self.viewLayout.addWidget(self.lbl_estado)
 
         # --- Botones Fluent del MessageBoxBase ---
@@ -231,73 +210,6 @@ class DialogoAlumno(MessageBoxBase):
             self._texto_preview("Sin foto — captura con la cámara\no elige un archivo")
         else:
             self._mostrar_foto_actual()
-
-    # ---------------- Inscripciones ----------------
-    def _agregar_inscripcion(self, curso="", seccion=""):
-        """Fila de inscripcion: combo de curso + combo de seccion + borrar."""
-        fila = QHBoxLayout()
-        fila.setSpacing(8)
-
-        combo_curso = ComboBox()
-        combo_curso.addItem("(sin curso)")
-        combo_curso.addItems(config_app.nombres_cursos(self._cfg))
-        idx = combo_curso.findText(str(curso or "").strip())
-        combo_curso.setCurrentIndex(idx if idx > 0 else 0)
-
-        combo_seccion = ComboBox()
-        combo_seccion.addItem("(sin sección)")
-        fila.addWidget(combo_curso, 1)
-        fila.addWidget(combo_seccion, 1)
-
-        btn = TransparentToolButton(FIcon.CLOSE)
-        btn.setToolTip("Quitar esta inscripción")
-        fila.addWidget(btn)
-
-        cont = QWidget()
-        cont.setStyleSheet("background: transparent;")
-        cont.setLayout(fila)
-        self._v_insc.addWidget(cont)
-
-        def _refrescar_secciones(*_):
-            texto = combo_seccion.currentText() if combo_seccion.count() else ""
-            elegido = str(texto or "").replace("(sin sección)", "").strip()
-            combo_seccion.blockSignals(True)
-            combo_seccion.clear()
-            combo_seccion.addItem("(sin sección)")
-            combo_seccion.addItems(
-                config_app.secciones_de_curso(self._cfg, combo_curso.currentText()))
-            if elegido:
-                j = combo_seccion.findText(elegido)
-                combo_seccion.setCurrentIndex(j if j > 0 else 0)
-            combo_seccion.blockSignals(False)
-
-        combo_curso.currentIndexChanged.connect(_refrescar_secciones)
-        btn.clicked.connect(lambda: self._quitar_inscripcion(cont))
-        self._filas_insc.append((cont, combo_curso, combo_seccion))
-        _refrescar_secciones()
-        if str(seccion or "").strip():
-            j = combo_seccion.findText(str(seccion).strip())
-            if j > 0:
-                combo_seccion.setCurrentIndex(j)
-
-    def _quitar_inscripcion(self, cont):
-        self._filas_insc = [(c, cu, s) for (c, cu, s) in self._filas_insc
-                            if c is not cont]
-        cont.setParent(None)
-        cont.deleteLater()
-
-    def inscripciones_elegidas(self):
-        """Inscripciones con curso real: [{"curso","seccion"},...]."""
-        res = []
-        for _c, combo_curso, combo_seccion in self._filas_insc:
-            if combo_curso.currentIndex() <= 0:
-                continue
-            seccion = ""
-            if combo_seccion.currentIndex() > 0:
-                seccion = combo_seccion.currentText().strip()
-            res.append({"curso": combo_curso.currentText().strip(),
-                        "seccion": seccion})
-        return res
 
     # ---------------- Preview de imagen ----------------
     def _texto_preview(self, texto):
@@ -358,6 +270,7 @@ class DialogoAlumno(MessageBoxBase):
         self.yesButton.setEnabled(not activo)
         self.cancelButton.setEnabled(not activo)
         self.lbl_estado.setText(texto)
+        self.lbl_estado.setVisible(bool(texto))
 
     def _guardar(self):
         nombre = self.edit_nombre.text().strip()
@@ -368,12 +281,6 @@ class DialogoAlumno(MessageBoxBase):
             aviso(self, "Datos incompletos",
                   "El nombre debe tener al menos una letra (no solo símbolos).")
             return
-        inscripciones = self.inscripciones_elegidas()
-        for _c, combo_curso, _s in self._filas_insc:
-            if combo_curso.currentIndex() <= 0:
-                aviso(self, "Inscripciones",
-                      "Elige el curso de cada inscripción o quítala.")
-                return
         apellidos = self.edit_apellidos.text().strip()
         dni = self.edit_dni.text().strip()
         telefono = self.edit_telefono.text().strip()
@@ -392,11 +299,10 @@ class DialogoAlumno(MessageBoxBase):
                 aviso(self, "Falta la foto",
                       "Captura una foto con la cámara o elige un archivo.")
                 return
-            fn = lambda: gestor.agregar(nombre, inscripciones=inscripciones,
+            fn = lambda: gestor.agregar(nombre, inscripciones=[],
                                         imagen=self._imagen_nueva, **extra)
         else:
             fn = lambda: gestor.editar(self._alumno["alumno_id"], nombre=nombre,
-                                       inscripciones=inscripciones,
                                        imagen=self._imagen_nueva, **extra)
 
         self._set_procesando(True, "Guardando y procesando imagen (puede tardar unos segundos)…")

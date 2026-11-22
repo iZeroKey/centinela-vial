@@ -115,7 +115,8 @@ def fuente_de_camara(cam):
 # cada curso (inscripciones en alumnos.json, ver gestor_alumnos).
 
 def lista_cursos(cfg):
-    """Cursos configurados como [{nombre, secciones, clases}] (normalizados)."""
+    """Cursos configurados como [{nombre, secciones, clases, tolerancia_tardanza_min, tolerancia_secciones}]."""
+    tol_default = _tol_global_fallback(cfg)
     res = []
     for c in cfg.get("cursos", []) or []:
         nombre = str(c.get("nombre", "") or "").strip()
@@ -127,8 +128,53 @@ def lista_cursos(cfg):
             clases = max(0, int(c.get("clases", 0) or 0))
         except (TypeError, ValueError):
             clases = 0
-        res.append({"nombre": nombre, "secciones": secciones, "clases": clases})
+        raw_tol = c.get("tolerancia_tardanza_min")
+        try:
+            tol_curso = max(0, int(raw_tol)) if raw_tol is not None else tol_default
+        except (TypeError, ValueError):
+            tol_curso = tol_default
+        tol_secs = {}
+        raw_map = c.get("tolerancia_secciones")
+        if isinstance(raw_map, dict):
+            for sec, val in raw_map.items():
+                sec_k = str(sec or "").strip()
+                if not sec_k or val is None:
+                    continue
+                try:
+                    tol_secs[sec_k] = max(0, int(val))
+                except (TypeError, ValueError):
+                    pass
+        res.append({
+            "nombre": nombre,
+            "secciones": secciones,
+            "clases": clases,
+            "tolerancia_tardanza_min": tol_curso,
+            "tolerancia_secciones": tol_secs,
+        })
     return res
+
+
+def _tol_global_fallback(cfg):
+    try:
+        return max(0, int((cfg or {}).get("asistencia", {}).get("tolerancia_tardanza_min", 5)))
+    except (TypeError, ValueError):
+        return 5
+
+
+def tolerancia_de(cfg, curso, seccion=""):
+    """Minutos de tolerancia de tardanza para (curso, seccion).
+
+    Si la sección tiene un margen propio activado en `tolerancia_secciones`,
+    usa ese valor; si no, hereda `tolerancia_tardanza_min` del curso.
+    """
+    curso = str(curso or "").strip()
+    seccion = str(seccion or "").strip()
+    for c in lista_cursos(cfg):
+        if c["nombre"] == curso:
+            if seccion and seccion in c["tolerancia_secciones"]:
+                return c["tolerancia_secciones"][seccion]
+            return c["tolerancia_tardanza_min"]
+    return _tol_global_fallback(cfg)
 
 
 def nombres_cursos(cfg):
@@ -220,6 +266,9 @@ def renombrar_seccion(cfg, curso, vieja, nueva):
                 if val not in reemplazo:
                     reemplazo.append(val)
             c["secciones"] = reemplazo
+            tol_secs = c.get("tolerancia_secciones")
+            if isinstance(tol_secs, dict) and vieja in tol_secs:
+                tol_secs[nueva] = tol_secs.pop(vieja)
     for h in cfg.get("horarios", []) or []:
         if str(h.get("curso", "") or "").strip() == curso:
             sec = str(h.get("seccion") or h.get("grupo") or "").strip()
@@ -283,7 +332,7 @@ def franjas_de(cfg, curso="", seccion=""):
         if str(f.get("curso", "")).strip() != curso:
             continue
         fs = _seccion_de_franja(f)
-        if seccion and fs != seccion:
+        if seccion and fs and fs != seccion:
             continue
         res.append(f)
     return res
@@ -324,7 +373,7 @@ def en_franja(cfg, curso, seccion, fecha_iso, hora_hhmm):
 
 
 def es_tardanza(cfg, curso, seccion, fecha_iso, hora_entrada_hhmm,
-                tolerancia_min=5):
+                tolerancia_min=None):
     """
     Clasifica una entrada contra el horario del curso ese dia.
       True  -> tardanza (llegada posterior a inicio + tolerancia)
@@ -339,6 +388,8 @@ def es_tardanza(cfg, curso, seccion, fecha_iso, hora_entrada_hhmm,
     minutos = _minutos(hora_entrada_hhmm)
     if not inicios or minutos is None:
         return None
+    if tolerancia_min is None:
+        tolerancia_min = tolerancia_de(cfg, curso, seccion)
     return minutos > min(inicios) + int(tolerancia_min)
 
 

@@ -3,28 +3,32 @@
 Centinela Control — Pestaña Cursos y horarios (v6)
 
 Gestión jerárquica con submenús desplegables:
-  Curso -> Secciones -> Franjas horarias.
+  Curso -> Secciones -> Alumnos asignados + Franjas horarias.
 
 Mantiene compatibilidad total con config.json (cfg["cursos"] y cfg["horarios"])
-y propaga renombrados de cursos/secciones a horarios, cámaras e inscripciones.
+y propaga cambios de cursos, secciones y asignaciones a alumnos.json y SQLite.
 """
 
 import os, sys
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QSize
+from PyQt6.QtGui import QColor, QIcon
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QFrame,
+    QWidget, QVBoxLayout, QHBoxLayout, QFrame, QHeaderView,
+    QAbstractItemView, QTableWidgetItem,
 )
 from qfluentwidgets import (
-    PushButton, PrimaryPushButton, LineEdit, SpinBox,
-    CardWidget, MessageBoxBase, SubtitleLabel, StrongBodyLabel,
-    BodyLabel, CaptionLabel, ScrollArea, TransparentToolButton,
-    IconWidget, InfoBadge, FluentIcon as FIcon,
+    PushButton, PrimaryPushButton, LineEdit, SearchLineEdit, SpinBox,
+    CheckBox, TableWidget, CardWidget, MessageBoxBase, SubtitleLabel,
+    StrongBodyLabel, BodyLabel, CaptionLabel, ScrollArea,
+    TransparentToolButton, IconWidget, InfoBadge, isDarkTheme,
+    FluentIcon as FIcon,
 )
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from dialogos_fluent import aviso, pregunta
 from dialogo_horarios import DIAS_CORTOS, DialogoFranja
+from ui_util import avatar_redondeado
 import config as config_app
 import gestor_alumnos as gestor
 
@@ -68,6 +72,7 @@ class DialogoCurso(MessageBoxBase):
         self.spin_clases = SpinBox()
         self.spin_clases.setRange(0, 999)
         self.spin_clases.setSpecialValueText("Sin límite")
+        self.spin_clases.setFixedWidth(150)
         try:
             self.spin_clases.setValue(int(self._curso.get("clases", 0) or 0))
         except (TypeError, ValueError):
@@ -76,6 +81,26 @@ class DialogoCurso(MessageBoxBase):
         fila_clases.addWidget(self.spin_clases)
         fila_clases.addStretch(1)
         self.viewLayout.addLayout(fila_clases)
+
+        fila_tol = QHBoxLayout()
+        fila_tol.setSpacing(10)
+        lbl_tol = CaptionLabel("Tardanza")
+        lbl_tol.setFixedWidth(90)
+        self.spin_tolerancia = SpinBox()
+        self.spin_tolerancia.setRange(0, 120)
+        self.spin_tolerancia.setSuffix(" min")
+        self.spin_tolerancia.setFixedWidth(150)
+        raw_tol = self._curso.get("tolerancia_tardanza_min")
+        try:
+            self.spin_tolerancia.setValue(max(0, int(raw_tol)) if raw_tol is not None else 5)
+        except (TypeError, ValueError):
+            self.spin_tolerancia.setValue(5)
+        lbl_tol_hint = CaptionLabel("minutos de gracia tras el inicio de clase")
+        lbl_tol_hint.setStyleSheet("color: rgba(139, 151, 168, 0.9);")
+        fila_tol.addWidget(lbl_tol)
+        fila_tol.addWidget(self.spin_tolerancia)
+        fila_tol.addWidget(lbl_tol_hint, 1)
+        self.viewLayout.addLayout(fila_tol)
 
         self.edit_secciones = None
         if self._es_nuevo:
@@ -91,8 +116,10 @@ class DialogoCurso(MessageBoxBase):
             self.viewLayout.addLayout(fila_sec)
 
         ayuda = CaptionLabel(
-            "La cantidad de clases define el máximo de sesiones visibles en el Historial (0 = sin límite).")
+            "La cantidad de clases limita las sesiones visibles en Asistencias (0 = sin límite). "
+            "Cada sección hereda la tolerancia del curso salvo que actives un margen propio.")
         ayuda.setWordWrap(True)
+        ayuda.setStyleSheet("color: rgba(139, 151, 168, 0.9);")
         self.viewLayout.addWidget(ayuda)
 
         self.yesButton.setText("Guardar")
@@ -113,6 +140,8 @@ class DialogoCurso(MessageBoxBase):
             "nombre": self.edit_nombre.text().strip(),
             "secciones": self._secciones_iniciales(),
             "clases": int(self.spin_clases.value()),
+            "tolerancia_tardanza_min": int(self.spin_tolerancia.value()),
+            "tolerancia_secciones": dict(self._curso.get("tolerancia_secciones") or {}),
         }
 
     def validate(self):
@@ -128,30 +157,33 @@ class DialogoCurso(MessageBoxBase):
 
 
 class DialogoSeccion(MessageBoxBase):
-    """Alta o renombrado de una sección dentro de un curso."""
+    """Alta o edición de una sección dentro de un curso (con margen de tardanza opcional)."""
 
-    def __init__(self, curso_nombre, seccion_actual="", existentes=None, parent=None):
+    def __init__(self, curso_nombre, seccion_actual="", existentes=None,
+                 tol_curso=5, tol_seccion=None, parent=None):
         super().__init__(parent=parent)
         self._actual = str(seccion_actual or "").strip()
+        self._tol_curso = max(0, int(tol_curso if tol_curso is not None else 5))
         self._existentes = {
             str(s).strip() for s in (existentes or [])
             if str(s).strip() and str(s).strip() != self._actual
         }
-        self.widget.setMinimumWidth(440)
+        self.widget.setMinimumWidth(480)
 
-        titulo = "Renombrar sección" if self._actual else "Nueva sección"
+        titulo = "Editar sección" if self._actual else "Nueva sección"
         self.titleLabel = SubtitleLabel(titulo)
         self.viewLayout.setSpacing(12)
         self.viewLayout.addWidget(self.titleLabel)
 
         sub = CaptionLabel(f"Curso: {curso_nombre}")
         sub.setWordWrap(True)
+        sub.setStyleSheet("color: rgba(148, 163, 184, 0.95);")
         self.viewLayout.addWidget(sub)
 
         fila = QHBoxLayout()
         fila.setSpacing(10)
         lbl = CaptionLabel("Sección")
-        lbl.setFixedWidth(64)
+        lbl.setFixedWidth(72)
         self.edit_seccion = LineEdit()
         self.edit_seccion.setPlaceholderText("Ej. C1, A o Turno Mañana")
         self.edit_seccion.setClearButtonEnabled(True)
@@ -160,11 +192,53 @@ class DialogoSeccion(MessageBoxBase):
         fila.addWidget(self.edit_seccion, 1)
         self.viewLayout.addLayout(fila)
 
+        # Override opcional de tardanza por sección
+        self.chk_tol_propia = CheckBox(
+            "Usar un margen de tardanza diferente en esta sección", self)
+        tiene_propia = tol_seccion is not None
+        self.chk_tol_propia.setChecked(tiene_propia)
+        self.viewLayout.addWidget(self.chk_tol_propia)
+
+        fila_tol = QHBoxLayout()
+        fila_tol.setSpacing(10)
+        lbl_t = CaptionLabel("Tardanza")
+        lbl_t.setFixedWidth(72)
+        self.spin_tol = SpinBox()
+        self.spin_tol.setRange(0, 120)
+        self.spin_tol.setSuffix(" min")
+        self.spin_tol.setFixedWidth(150)
+        self.spin_tol.setValue(
+            max(0, int(tol_seccion)) if tiene_propia else self._tol_curso)
+        self.spin_tol.setEnabled(tiene_propia)
+        self.lbl_tol_info = CaptionLabel("", self)
+        self.lbl_tol_info.setWordWrap(True)
+        self.lbl_tol_info.setStyleSheet("color: rgba(139, 151, 168, 0.9);")
+        fila_tol.addWidget(lbl_t)
+        fila_tol.addWidget(self.spin_tol)
+        fila_tol.addWidget(self.lbl_tol_info, 1)
+        self.viewLayout.addLayout(fila_tol)
+
+        self.chk_tol_propia.toggled.connect(self._on_toggle_tol)
+        self._on_toggle_tol(tiene_propia)
+
         self.yesButton.setText("Guardar")
         self.cancelButton.setText("Cancelar")
 
+    def _on_toggle_tol(self, activo):
+        self.spin_tol.setEnabled(bool(activo))
+        if activo:
+            self.lbl_tol_info.setText("Margen propio para esta sección.")
+        else:
+            self.lbl_tol_info.setText(
+                f"Mantiene el del curso ({self._tol_curso} min).")
+
     def nombre_seccion(self):
         return self.edit_seccion.text().strip()
+
+    def tolerancia_personalizada(self):
+        if self.chk_tol_propia.isChecked():
+            return int(self.spin_tol.value())
+        return None
 
     def validate(self):
         s = self.nombre_seccion()
@@ -176,6 +250,294 @@ class DialogoSeccion(MessageBoxBase):
                   f"La sección «{s}» ya existe en este curso.")
             return False
         return True
+
+
+class DialogoAsignarAlumnos(MessageBoxBase):
+    """Asigna alumnos de la base general a una sección específica de un curso."""
+
+    def __init__(self, curso_nombre, seccion_nombre, parent=None):
+        super().__init__(parent=parent)
+        self._curso = str(curso_nombre or "").strip()
+        self._seccion = str(seccion_nombre or "").strip()
+        self._actualizando = False
+        self._filas_meta = []
+
+        self.widget.setMinimumWidth(680)
+        self.viewLayout.setSpacing(12)
+
+        # Cabecera con título y contador en vivo
+        cab = QHBoxLayout()
+        cab.setSpacing(10)
+        col_tit = QVBoxLayout()
+        col_tit.setSpacing(2)
+        self.titleLabel = SubtitleLabel(f"Alumnos — Sección {self._seccion}")
+        sub = CaptionLabel(
+            f"Curso: {self._curso} · Cada alumno pertenece como máximo a una sección por curso.")
+        sub.setWordWrap(True)
+        sub.setStyleSheet("color: rgba(148, 163, 184, 0.95);")
+        col_tit.addWidget(self.titleLabel)
+        col_tit.addWidget(sub)
+        cab.addLayout(col_tit, 1)
+
+        self.badge_sel = InfoBadge.attension("0 asignados", self)
+        cab.addWidget(self.badge_sel, 0, Qt.AlignmentFlag.AlignTop)
+        self.viewLayout.addLayout(cab)
+
+        alumnos = gestor.listar(incluir_inactivos=False)
+        alumnos.sort(key=lambda a: (
+            str(a.get("apellidos", "") or "").strip() == "",
+            str(a.get("apellidos", "") or "").strip().lower(),
+            str(a.get("nombre", "") or "").strip().lower(),
+        ))
+        mapa_curso = gestor.mapa_secciones_en_curso(self._curso)
+
+        if not alumnos:
+            vacio = QWidget(self)
+            vacio.setStyleSheet("background: transparent;")
+            vv = QVBoxLayout(vacio)
+            vv.setContentsMargins(24, 48, 24, 48)
+            vv.setSpacing(10)
+            vv.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            ico = IconWidget(FIcon.PEOPLE, vacio)
+            ico.setFixedSize(44, 44)
+            vv.addWidget(ico, 0, Qt.AlignmentFlag.AlignCenter)
+            tit = StrongBodyLabel("No hay alumnos registrados", vacio)
+            vv.addWidget(tit, 0, Qt.AlignmentFlag.AlignCenter)
+            hint = CaptionLabel(
+                "Registra primero los alumnos en la pestaña «Alumnos» y vuelve aquí para asignarlos.",
+                vacio)
+            hint.setWordWrap(True)
+            hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            hint.setStyleSheet("color: rgba(139, 151, 168, 0.9);")
+            vv.addWidget(hint, 0, Qt.AlignmentFlag.AlignCenter)
+            self.viewLayout.addWidget(vacio)
+            self.tabla = None
+            self.yesButton.setText("Guardar")
+            self.yesButton.setEnabled(False)
+            self.cancelButton.setText("Cerrar")
+            return
+
+        # Barra de búsqueda y filtro
+        barra = QHBoxLayout()
+        barra.setSpacing(10)
+        self.edit_buscar = SearchLineEdit(self)
+        self.edit_buscar.setPlaceholderText("Buscar por apellido, nombre o DNI…")
+        self.edit_buscar.setClearButtonEnabled(True)
+        self.edit_buscar.textChanged.connect(self._aplicar_filtro)
+        self.chk_solo_sel = CheckBox("Solo asignados", self)
+        self.chk_solo_sel.toggled.connect(self._aplicar_filtro)
+        barra.addWidget(self.edit_buscar, 1)
+        barra.addWidget(self.chk_solo_sel)
+        self.viewLayout.addLayout(barra)
+
+        # Acciones masivas + conteo visible
+        fila_acc = QHBoxLayout()
+        fila_acc.setSpacing(8)
+        btn_sel_vis = PushButton("Marcar visibles", self)
+        btn_sel_vis.setObjectName("secundario")
+        btn_sel_vis.setMinimumHeight(30)
+        btn_sel_vis.clicked.connect(lambda: self._marcar_visibles(True))
+        btn_qui_vis = PushButton("Desmarcar visibles", self)
+        btn_qui_vis.setObjectName("secundario")
+        btn_qui_vis.setMinimumHeight(30)
+        btn_qui_vis.clicked.connect(lambda: self._marcar_visibles(False))
+        self.lbl_mostrando = CaptionLabel("", self)
+        self.lbl_mostrando.setStyleSheet("color: rgba(139, 151, 168, 0.9);")
+        fila_acc.addWidget(btn_sel_vis)
+        fila_acc.addWidget(btn_qui_vis)
+        fila_acc.addStretch(1)
+        fila_acc.addWidget(self.lbl_mostrando)
+        self.viewLayout.addLayout(fila_acc)
+
+        # Tabla de selección rápida
+        self.tabla = TableWidget(self)
+        self.tabla.setColumnCount(4)
+        self.tabla.setHorizontalHeaderLabels(["", "Alumno", "DNI", "Estado en el curso"])
+        self.tabla.setBorderVisible(True)
+        self.tabla.setBorderRadius(8)
+        self.tabla.setWordWrap(False)
+        self.tabla.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.tabla.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        self.tabla.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.tabla.verticalHeader().setVisible(False)
+        self.tabla.verticalHeader().setDefaultSectionSize(44)
+        self.tabla.setIconSize(QSize(30, 30))
+        self.tabla.setFixedHeight(350)
+
+        hdr = self.tabla.horizontalHeader()
+        hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+        self.tabla.setColumnWidth(0, 40)
+        hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        hdr.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
+        self.tabla.setColumnWidth(2, 105)
+        hdr.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
+        self.tabla.setColumnWidth(3, 170)
+
+        oscuro = isDarkTheme()
+        self._actualizando = True
+        self.tabla.setRowCount(len(alumnos))
+        for row, a in enumerate(alumnos):
+            aid = a.get("alumno_id", "")
+            nombre = str(a.get("nombre", "") or "").strip()
+            apellidos = str(a.get("apellidos", "") or "").strip()
+            dni = str(a.get("dni", "") or "").strip()
+            mostrar = f"{apellidos}, {nombre}" if (apellidos and nombre) else (apellidos or nombre or "Sin nombre")
+            sec_orig = mapa_curso.get(aid)
+            marcado = (sec_orig == self._seccion)
+
+            it_chk = QTableWidgetItem("")
+            it_chk.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsUserCheckable)
+            it_chk.setCheckState(
+                Qt.CheckState.Checked if marcado else Qt.CheckState.Unchecked)
+            self.tabla.setItem(row, 0, it_chk)
+
+            it_nom = QTableWidgetItem(mostrar)
+            it_nom.setFlags(Qt.ItemFlag.ItemIsEnabled)
+            ruta = gestor.ruta_foto_absoluta(a.get("foto_referencia"))
+            pix = avatar_redondeado(ruta, 30, radio_ratio=0.28, oscuro=oscuro)
+            it_nom.setIcon(QIcon(pix))
+            it_nom.setToolTip(mostrar)
+            self.tabla.setItem(row, 1, it_nom)
+
+            it_dni = QTableWidgetItem(dni or "—")
+            it_dni.setFlags(Qt.ItemFlag.ItemIsEnabled)
+            it_dni.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            if not dni:
+                it_dni.setForeground(QColor("#64748b"))
+            self.tabla.setItem(row, 2, it_dni)
+
+            it_est = QTableWidgetItem("")
+            it_est.setFlags(Qt.ItemFlag.ItemIsEnabled)
+            it_est.setTextAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+            self.tabla.setItem(row, 3, it_est)
+
+            self._filas_meta.append({
+                "alumno_id": aid,
+                "sec_orig": sec_orig,
+                "busqueda": f"{apellidos} {nombre} {mostrar} {nombre} {apellidos} {dni} {sec_orig or ''}".lower(),
+            })
+            self._pintar_estado_fila(row)
+
+        self._actualizando = False
+        self.tabla.itemChanged.connect(self._on_item_changed)
+        self.tabla.cellClicked.connect(self._on_cell_clicked)
+        self.viewLayout.addWidget(self.tabla)
+
+        self.lbl_sin_match = CaptionLabel("Ningún alumno coincide con el filtro actual.", self)
+        self.lbl_sin_match.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_sin_match.setStyleSheet("color: rgba(139, 151, 168, 0.9); padding: 6px;")
+        self.lbl_sin_match.setVisible(False)
+        self.viewLayout.addWidget(self.lbl_sin_match)
+
+        self._actualizar_contadores()
+
+        self.yesButton.setText("Guardar asignación")
+        self.cancelButton.setText("Cancelar")
+
+    def _esta_marcado(self, row):
+        it = self.tabla.item(row, 0)
+        return it is not None and it.checkState() == Qt.CheckState.Checked
+
+    def _pintar_estado_fila(self, row):
+        meta = self._filas_meta[row]
+        sec_orig = meta["sec_orig"]
+        marcado = self._esta_marcado(row)
+        it = self.tabla.item(row, 3)
+        if it is None:
+            return
+        if marcado:
+            if sec_orig == self._seccion:
+                texto, color = "En esta sección", "#34d399"
+            elif sec_orig:
+                texto, color = f"Se moverá desde {sec_orig}", "#fbbf24"
+            else:
+                texto, color = "Se asignará", "#5eead4"
+        else:
+            if sec_orig == self._seccion:
+                texto, color = "Se quitará", "#fca5a5"
+            elif sec_orig:
+                texto, color = f"En sección {sec_orig}", "#fbbf24"
+            else:
+                texto, color = "Sin asignar", "#8b97a8"
+        it.setText(texto)
+        it.setForeground(QColor(color))
+
+    def _on_cell_clicked(self, row, col):
+        if col == 0 or self._actualizando:
+            return
+        it = self.tabla.item(row, 0)
+        if it is None:
+            return
+        nuevo = (
+            Qt.CheckState.Unchecked
+            if it.checkState() == Qt.CheckState.Checked
+            else Qt.CheckState.Checked
+        )
+        it.setCheckState(nuevo)
+
+    def _on_item_changed(self, item):
+        if self._actualizando or item.column() != 0:
+            return
+        self._actualizando = True
+        try:
+            self._pintar_estado_fila(item.row())
+        finally:
+            self._actualizando = False
+        if self.chk_solo_sel.isChecked():
+            self._aplicar_filtro()
+        else:
+            self._actualizar_contadores()
+
+    def _marcar_visibles(self, marcar):
+        if self.tabla is None:
+            return
+        estado = Qt.CheckState.Checked if marcar else Qt.CheckState.Unchecked
+        self._actualizando = True
+        try:
+            for row in range(self.tabla.rowCount()):
+                if not self.tabla.isRowHidden(row):
+                    it = self.tabla.item(row, 0)
+                    if it is not None and it.checkState() != estado:
+                        it.setCheckState(estado)
+                        self._pintar_estado_fila(row)
+        finally:
+            self._actualizando = False
+        self._aplicar_filtro()
+
+    def _aplicar_filtro(self, *_):
+        if self.tabla is None:
+            return
+        texto = self.edit_buscar.text().strip().lower()
+        solo_sel = self.chk_solo_sel.isChecked()
+        visibles = 0
+        for row, meta in enumerate(self._filas_meta):
+            ok_txt = not texto or texto in meta["busqueda"]
+            ok_sel = (not solo_sel) or self._esta_marcado(row)
+            ver = ok_txt and ok_sel
+            self.tabla.setRowHidden(row, not ver)
+            if ver:
+                visibles += 1
+        self.lbl_sin_match.setVisible(visibles == 0)
+        self._actualizar_contadores(visibles)
+
+    def _actualizar_contadores(self, visibles=None):
+        if self.tabla is None:
+            return
+        total = len(self._filas_meta)
+        sel = sum(1 for r in range(total) if self._esta_marcado(r))
+        if visibles is None:
+            visibles = sum(1 for r in range(total) if not self.tabla.isRowHidden(r))
+        self.badge_sel.setText(f"{sel} asignado{'s' if sel != 1 else ''}")
+        self.lbl_mostrando.setText(f"Mostrando {visibles} de {total}")
+
+    def ids_seleccionados(self):
+        if self.tabla is None:
+            return []
+        return [
+            self._filas_meta[r]["alumno_id"]
+            for r in range(len(self._filas_meta))
+            if self._esta_marcado(r)
+        ]
 
 
 def _texto_dias(franja):
@@ -239,7 +601,7 @@ class TarjetaSeccionSubmenu(QFrame):
     """Submenú de una sección dentro de un curso (conteo + horarios + acciones)."""
 
     def __init__(self, curso_nombre, seccion_nombre, n_alumnos, franjas,
-                 callbacks, es_general=False, parent=None):
+                 callbacks, es_general=False, tol_seccion=None, parent=None):
         super().__init__(parent)
         self.setObjectName("subtarjetaSeccion")
         self.setStyleSheet(
@@ -273,8 +635,19 @@ class TarjetaSeccionSubmenu(QFrame):
             badge_alu = InfoBadge.attension(
                 f"{n_alumnos} alumno{'s' if n_alumnos != 1 else ''}", self)
             cab.addWidget(badge_alu)
+            if tol_seccion is not None:
+                badge_tol = InfoBadge.warning(
+                    f"Tardanza {tol_seccion} min", self)
+                cab.addWidget(badge_tol)
 
         cab.addStretch(1)
+
+        if not es_general:
+            btn_alu = PushButton(FIcon.PEOPLE, "Asignar alumnos", self)
+            btn_alu.setMinimumHeight(30)
+            btn_alu.clicked.connect(
+                lambda: callbacks["asignar_alumnos"](curso_nombre, seccion_nombre))
+            cab.addWidget(btn_alu)
 
         btn_add_h = PushButton(FIcon.ADD, "Agregar horario", self)
         btn_add_h.setMinimumHeight(30)
@@ -284,7 +657,7 @@ class TarjetaSeccionSubmenu(QFrame):
 
         if not es_general:
             btn_ren = TransparentToolButton(FIcon.EDIT, self)
-            btn_ren.setToolTip("Renombrar sección")
+            btn_ren.setToolTip("Editar sección y tolerancia de tardanza")
             btn_ren.clicked.connect(
                 lambda: callbacks["renombrar_seccion"](curso_nombre, seccion_nombre))
             btn_del = TransparentToolButton(FIcon.DELETE, self)
@@ -343,12 +716,13 @@ class TarjetaCurso(CardWidget):
         n_sec = len(curso.get("secciones") or [])
         clases = curso.get("clases", 0)
         txt_clases = f"{clases} clases" if clases else "Sin límite de clases"
+        tol_curso = curso.get("tolerancia_tardanza_min", 5)
         n_franjas = len(franjas_curso)
         sub_txt = (
             f"{n_sec} sección{'es' if n_sec != 1 else ''} · "
             f"{n_alumnos} alumno{'s' if n_alumnos != 1 else ''} · "
             f"{n_franjas} horario{'s' if n_franjas != 1 else ''} · "
-            f"{txt_clases}"
+            f"{txt_clases} · Tolerancia {tol_curso} min"
         )
         self.lbl_sub = CaptionLabel(sub_txt, cab)
         self.lbl_sub.setStyleSheet("color: rgba(148, 163, 184, 0.95);")
@@ -404,11 +778,13 @@ class TarjetaCurso(CardWidget):
             hint.setStyleSheet("color: rgba(139, 151, 168, 0.9); padding: 6px 4px;")
             vc.addWidget(hint)
         else:
+            tol_secs = curso.get("tolerancia_secciones") or {}
             for sec in todas_sec:
                 n_alu_sec = conteo_secciones.get((self.curso_nombre, sec), 0)
                 vc.addWidget(TarjetaSeccionSubmenu(
                     self.curso_nombre, sec, n_alu_sec,
                     por_sec.get(sec, []), callbacks, es_general=False,
+                    tol_seccion=tol_secs.get(sec),
                     parent=self.cuerpo,
                 ))
             if generales:
@@ -461,7 +837,7 @@ class PanelClases(QWidget):
         col_tit.setSpacing(2)
         lbl_tit = SubtitleLabel("Cursos y horarios", self)
         lbl_desc = CaptionLabel(
-            "Organiza cada curso con sus secciones y franjas horarias de asistencia.",
+            "Organiza cada curso con sus secciones, asigna alumnos y define las franjas horarias.",
             self)
         lbl_desc.setStyleSheet("color: rgba(148, 163, 184, 0.95);")
         col_tit.addWidget(lbl_tit)
@@ -494,7 +870,17 @@ class PanelClases(QWidget):
         scroll.enableTransparentBackground()
         raiz.addWidget(scroll, 1)
 
-        self.refrescar()
+        self._sucio = True
+
+    def marcar_sucio(self):
+        self._sucio = True
+        if self.isVisible():
+            self.refrescar()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if self._sucio:
+            self.refrescar()
 
     def _construir_estado_vacio(self):
         w = QWidget(self._cuerpo)
@@ -535,6 +921,7 @@ class PanelClases(QWidget):
 
     def refrescar(self):
         """Reconstruye las tarjetas de cursos, secciones y horarios."""
+        self._sucio = False
         while self._v_cursos.count():
             item = self._v_cursos.takeAt(0)
             w = item.widget()
@@ -557,6 +944,7 @@ class PanelClases(QWidget):
                 "agregar_seccion": self._agregar_seccion,
                 "renombrar_seccion": self._renombrar_seccion,
                 "quitar_seccion": self._quitar_seccion,
+                "asignar_alumnos": self._asignar_alumnos,
                 "editar_curso": self._editar_curso,
                 "quitar_curso": self._quitar_curso,
                 "agregar_franja": self._agregar_franja,
@@ -604,7 +992,11 @@ class PanelClases(QWidget):
         curso, idx = self._buscar_curso_idx(nombre)
         if curso is None:
             return
-        dlg = DialogoCurso(curso, config_app.lista_cursos(self.cfg), self)
+        curso_norm = next(
+            (c for c in config_app.lista_cursos(self.cfg) if c["nombre"] == nombre),
+            curso,
+        )
+        dlg = DialogoCurso(curso_norm, config_app.lista_cursos(self.cfg), self)
         if dlg.exec():
             datos = dlg.datos()
             viejo = str(curso.get("nombre", "") or "").strip()
@@ -613,6 +1005,8 @@ class PanelClases(QWidget):
                 "nombre": nuevo,
                 "secciones": list(curso.get("secciones") or []),
                 "clases": datos["clases"],
+                "tolerancia_tardanza_min": datos["tolerancia_tardanza_min"],
+                "tolerancia_secciones": dict(curso.get("tolerancia_secciones") or {}),
             }
             if viejo != nuevo:
                 config_app.renombrar_curso(self.cfg, viejo, nuevo)
@@ -627,7 +1021,9 @@ class PanelClases(QWidget):
             return
         if not pregunta(
                 self, "Eliminar curso",
-                f"¿Eliminar el curso «{nombre}» y sus horarios asociados?",
+                f"¿Eliminar el curso «{nombre}» y sus horarios asociados?\n"
+                "Las asignaciones de alumnos a este curso se quitarán "
+                "(los alumnos se conservan en la base de Alumnos).",
                 yes="Eliminar"):
             return
         del self.cfg["cursos"][idx]
@@ -635,40 +1031,72 @@ class PanelClases(QWidget):
             h for h in (self.cfg.get("horarios", []) or [])
             if str(h.get("curso", "") or "").strip() != nombre
         ]
+        gestor.quitar_inscripciones_curso(nombre)
         self._guardar_y("cursos_cambiadas")
         self.refrescar()
 
     # ---------------- Acciones sobre secciones ----------------
+    def _asignar_alumnos(self, curso_nombre, seccion_nombre):
+        dlg = DialogoAsignarAlumnos(curso_nombre, seccion_nombre, self.window())
+        if dlg.exec():
+            agregados, quitados, movidos = gestor.asignar_alumnos_seccion(
+                curso_nombre, seccion_nombre, dlg.ids_seleccionados())
+            self.refrescar()
+            fn = self._cb.get("asignaciones_cambiadas")
+            if fn:
+                fn((curso_nombre, seccion_nombre, agregados, quitados, movidos))
+
     def _agregar_seccion(self, curso_nombre):
         curso, idx = self._buscar_curso_idx(curso_nombre)
         if curso is None:
             return
         existentes = curso.get("secciones") or []
-        dlg = DialogoSeccion(curso_nombre, "", existentes, self)
+        tol_curso = config_app.tolerancia_de(self.cfg, curso_nombre)
+        dlg = DialogoSeccion(
+            curso_nombre, "", existentes, tol_curso=tol_curso, tol_seccion=None, parent=self)
         if dlg.exec():
             sec = dlg.nombre_seccion()
             secs = [str(s).strip() for s in existentes if str(s).strip()]
             if sec not in secs:
                 secs.append(sec)
             self.cfg["cursos"][idx]["secciones"] = secs
+            tol_propia = dlg.tolerancia_personalizada()
+            tol_map = dict(curso.get("tolerancia_secciones") or {})
+            if tol_propia is not None:
+                tol_map[sec] = tol_propia
+            else:
+                tol_map.pop(sec, None)
+            self.cfg["cursos"][idx]["tolerancia_secciones"] = tol_map
             self._expandidos[curso_nombre] = True
             self._guardar_y("cursos_cambiadas")
             self.refrescar()
 
     def _renombrar_seccion(self, curso_nombre, seccion_vieja):
-        curso, _idx = self._buscar_curso_idx(curso_nombre)
+        curso, idx = self._buscar_curso_idx(curso_nombre)
         if curso is None:
             return
+        tol_curso = config_app.tolerancia_de(self.cfg, curso_nombre)
+        tol_map = dict(curso.get("tolerancia_secciones") or {})
+        tol_actual = tol_map.get(seccion_vieja)
         dlg = DialogoSeccion(
-            curso_nombre, seccion_vieja, curso.get("secciones") or [], self)
+            curso_nombre, seccion_vieja, curso.get("secciones") or [],
+            tol_curso=tol_curso, tol_seccion=tol_actual, parent=self)
         if dlg.exec():
             nueva = dlg.nombre_seccion()
             if nueva != seccion_vieja:
                 config_app.renombrar_seccion(
                     self.cfg, curso_nombre, seccion_vieja, nueva)
                 gestor.renombrar_seccion(curso_nombre, seccion_vieja, nueva)
-                self._guardar_y("cursos_cambiadas")
-                self.refrescar()
+            tol_propia = dlg.tolerancia_personalizada()
+            tol_map_nuevo = dict(self.cfg["cursos"][idx].get("tolerancia_secciones") or {})
+            tol_map_nuevo.pop(seccion_vieja, None)
+            if tol_propia is not None:
+                tol_map_nuevo[nueva] = tol_propia
+            else:
+                tol_map_nuevo.pop(nueva, None)
+            self.cfg["cursos"][idx]["tolerancia_secciones"] = tol_map_nuevo
+            self._guardar_y("cursos_cambiadas")
+            self.refrescar()
 
     def _quitar_seccion(self, curso_nombre, seccion):
         curso, idx = self._buscar_curso_idx(curso_nombre)
@@ -677,13 +1105,17 @@ class PanelClases(QWidget):
         if not pregunta(
                 self, "Quitar sección",
                 f"¿Quitar la sección «{seccion}» de «{curso_nombre}»?\n"
-                "Sus franjas horarias específicas también se eliminarán.",
+                "Sus franjas horarias y asignaciones de alumnos se quitarán "
+                "(los alumnos se conservan en la base de Alumnos).",
                 yes="Quitar"):
             return
         self.cfg["cursos"][idx]["secciones"] = [
             s for s in (curso.get("secciones") or [])
             if str(s).strip() != seccion
         ]
+        tol_map = dict(curso.get("tolerancia_secciones") or {})
+        tol_map.pop(seccion, None)
+        self.cfg["cursos"][idx]["tolerancia_secciones"] = tol_map
         self.cfg["horarios"] = [
             h for h in (self.cfg.get("horarios", []) or [])
             if not (
@@ -691,6 +1123,7 @@ class PanelClases(QWidget):
                 and str(h.get("seccion") or h.get("grupo") or "").strip() == seccion
             )
         ]
+        gestor.quitar_inscripciones_seccion(curso_nombre, seccion)
         self._guardar_y("cursos_cambiadas")
         self.refrescar()
 

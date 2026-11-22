@@ -29,13 +29,46 @@ Señales:
   error (str)
 """
 
-import os, sys, time, socket, urllib.request
+import os, sys, time, math, socket, urllib.request
 import threading
 import queue
 import cv2
 import numpy as np
 
 from PyQt6.QtCore import QThread, pyqtSignal
+
+try:
+    from PIL import Image as _PilImage, ImageDraw as _PilDraw, ImageFont as _PilFont
+    _HAS_PIL = True
+except Exception:
+    _HAS_PIL = False
+
+_PIL_FONT_CACHE = {}
+
+
+def _cargar_fuente_hud(px, negrita=True):
+    """Carga y cachea una fuente TrueType (Segoe UI) para el HUD de escaneo."""
+    if not _HAS_PIL:
+        return None
+    clave = (int(px), bool(negrita))
+    if clave in _PIL_FONT_CACHE:
+        return _PIL_FONT_CACHE[clave]
+    rutas = (
+        [r"C:\Windows\Fonts\seguisb.ttf", r"C:\Windows\Fonts\segoeuib.ttf",
+         r"C:\Windows\Fonts\arialbd.ttf"]
+        if negrita else
+        [r"C:\Windows\Fonts\segoeui.ttf", r"C:\Windows\Fonts\arial.ttf"]
+    )
+    fuente = None
+    for r in rutas:
+        if os.path.isfile(r):
+            try:
+                fuente = _PilFont.truetype(r, max(10, int(px)))
+                break
+            except Exception:
+                pass
+    _PIL_FONT_CACHE[clave] = fuente
+    return fuente
 
 # Opener HTTP sin proxy: el stream va por LAN directa y un proxy del sistema
 # (tipico en red de campus) romperia la lectura del MJPEG.
@@ -49,11 +82,12 @@ CENTRO_DIST_MAX = 100.0
 GRACE_SEG = 0.8     # px máximo entre frames para considerar misma cara
 
 # --- Paleta del overlay (BGR) ---
-# teal Fluent para caras reconocidas, rojo suave para desconocidas.
-COLOR_IDENT = (191, 212, 45)   # ~#2dd4bf
-COLOR_DESC = (68, 68, 239)     # ~#ef4444
+# teal Fluent al verificar, esmeralda al confirmar, coral suave para desconocidos.
+COLOR_IDENT = (191, 212, 45)    # #2dd4bf
+COLOR_CONFIRM = (153, 211, 52)  # #34d399
+COLOR_DESC = (113, 113, 248)    # #f87171
 COLOR_SIN_DATOS = (140, 140, 140)
-CHIP_FONDO = (26, 22, 16)      # fondo oscuro translucido del chip
+CHIP_FONDO = (26, 18, 13)       # #0d121a (glass oscuro)
 CHIP_TEXTO = (248, 250, 252)
 
 
@@ -391,87 +425,224 @@ class CamaraHilo(QThread):
         cv2.rectangle(overlay, (0, 0), (xb - xa - 1, yb - ya - 1), color, -1, cv2.LINE_AA)
         cv2.addWeighted(overlay, alpha, roi, 1.0 - alpha, 0, dst=roi)
 
-    def _tag(self, frame, x, y_borde, texto, color, progreso=None):
-        """Etiqueta solida pegada al borde superior del box.
+    def _componer_rgba(self, frame, x, y, rgba_arr):
+        """Compone un parche RGBA sobre el frame BGR (alpha blending rápido)."""
+        alto_f, ancho_f = frame.shape[:2]
+        ph, pw = rgba_arr.shape[:2]
+        x1, y1 = max(0, int(x)), max(0, int(y))
+        x2, y2 = min(ancho_f, int(x) + pw), min(alto_f, int(y) + ph)
+        if x2 <= x1 or y2 <= y1:
+            return
+        sx1, sy1 = x1 - int(x), y1 - int(y)
+        sx2, sy2 = sx1 + (x2 - x1), sy1 + (y2 - y1)
+        patch = rgba_arr[sy1:sy2, sx1:sx2]
+        alpha = patch[:, :, 3:4].astype(np.float32) / 255.0
+        # PIL es RGB; OpenCV es BGR
+        bgr_patch = patch[:, :, 2::-1].astype(np.float32)
+        roi = frame[y1:y2, x1:x2].astype(np.float32)
+        frame[y1:y2, x1:x2] = np.clip(
+            bgr_patch * alpha + roi * (1.0 - alpha), 0, 255).astype(np.uint8)
 
-        (x, y_borde) es el borde inferior-izquierdo deseado. El progreso se
-        dibuja DENTRO de la etiqueta (franja inferior), de modo que entre
-        etiqueta y corchetes no queda ningun elemento que pueda chocar.
-        Color de texto por luminancia del fondo.
-        """
+    def _dibujar_esquinas_redondeadas(self, frame, ax1, ay1, ax2, ay2, color, k):
+        """Esquinas curvas estilo FaceID con sombra sutil para contraste en cualquier fondo."""
+        x1, y1 = int(round(ax1)), int(round(ay1))
+        x2, y2 = int(round(ax2)), int(round(ay2))
+        bw, bh = max(1, x2 - x1), max(1, y2 - y1)
+        r = max(8, min(22, int(round(min(bw, bh) * 0.13))))
+        L = max(r + 8, int(round(min(bw, bh) * 0.24)))
+        L = min(L, bw // 2 - 2, bh // 2 - 2)
+        r = min(r, max(4, L - 2))
+        thick = max(2, round(2.6 * k))
+
+        def _trazar(col, grosor):
+            # Superior izquierda
+            cv2.ellipse(frame, (x1 + r, y1 + r), (r, r), 180, 0, 90, col, grosor, cv2.LINE_AA)
+            cv2.line(frame, (x1 + r, y1), (x1 + L, y1), col, grosor, cv2.LINE_AA)
+            cv2.line(frame, (x1, y1 + r), (x1, y1 + L), col, grosor, cv2.LINE_AA)
+            # Superior derecha
+            cv2.ellipse(frame, (x2 - r, y1 + r), (r, r), 270, 0, 90, col, grosor, cv2.LINE_AA)
+            cv2.line(frame, (x2 - L, y1), (x2 - r, y1), col, grosor, cv2.LINE_AA)
+            cv2.line(frame, (x2, y1 + r), (x2, y1 + L), col, grosor, cv2.LINE_AA)
+            # Inferior izquierda
+            cv2.ellipse(frame, (x1 + r, y2 - r), (r, r), 90, 0, 90, col, grosor, cv2.LINE_AA)
+            cv2.line(frame, (x1 + r, y2), (x1 + L, y2), col, grosor, cv2.LINE_AA)
+            cv2.line(frame, (x1, y2 - L), (x1, y2 - r), col, grosor, cv2.LINE_AA)
+            # Inferior derecha
+            cv2.ellipse(frame, (x2 - r, y2 - r), (r, r), 0, 0, 90, col, grosor, cv2.LINE_AA)
+            cv2.line(frame, (x2 - L, y2), (x2 - r, y2), col, grosor, cv2.LINE_AA)
+            cv2.line(frame, (x2, y2 - L), (x2, y2 - r), col, grosor, cv2.LINE_AA)
+
+        # Halo oscuro muy fino detrás para legibilidad sobre paredes claras
+        _trazar((16, 18, 22), thick + 2)
+        _trazar(color, thick)
+
+    def _dibujar_linea_escaneo(self, frame, ax1, ay1, ax2, ay2, color, k):
+        """Haz horizontal sutil que recorre el rostro mientras se verifica."""
+        x1 = int(round(ax1)) + max(6, round(8 * k))
+        x2 = int(round(ax2)) - max(6, round(8 * k))
+        y1 = int(round(ay1)) + max(10, round(12 * k))
+        y2 = int(round(ay2)) - max(10, round(12 * k))
+        if x2 <= x1 + 8 or y2 <= y1 + 12:
+            return
+        fase = 0.5 - 0.5 * math.cos(time.monotonic() * 2.8)
+        y_beam = int(round(y1 + (y2 - y1) * fase))
+        banda = max(6, round(8 * k))
+        self._rect_alpha(frame, x1, y_beam - banda // 2, x2 - x1, banda, color, 0.10)
+        self._rect_alpha(frame, x1, y_beam, x2 - x1, max(2, round(1.8 * k)), color, 0.34)
+
+    def _tag(self, frame, cx, y_top, y_bot, titulo, detalle, color, progreso=None):
+        """Píldora glassmórfica flotante centrada sobre el rostro con tipografía nítida."""
         k = self._factor_metrica(frame)
-        escala = 0.55 * k
+        alto_f, ancho_f = frame.shape[:2]
+        b, g, r = [int(v) for v in color]
+        accent_rgb = (r, g, b)
+
+        fuente_tit = _cargar_fuente_hud(round(14 * k), negrita=True)
+        fuente_det = _cargar_fuente_hud(round(12.5 * k), negrita=True)
+        if _HAS_PIL and fuente_tit is not None:
+            pad_x = max(10, round(12 * k))
+            pad_y = max(7, round(8 * k))
+            dot_r = max(3, round(3.8 * k))
+            gap_dot = max(7, round(8 * k))
+            gap_det = max(10, round(12 * k)) if detalle else 0
+            hbar = max(4, round(4.5 * k)) if progreso is not None else 0
+            gap_bar = max(6, round(6 * k)) if progreso is not None else 0
+
+            dummy = _PilDraw.Draw(_PilImage.new("RGBA", (1, 1)))
+            bb_t = dummy.textbbox((0, 0), titulo, font=fuente_tit)
+            tw, th = bb_t[2] - bb_t[0], bb_t[3] - bb_t[1]
+            dw = dh = 0
+            if detalle:
+                bb_d = dummy.textbbox((0, 0), detalle, font=fuente_det)
+                dw, dh = bb_d[2] - bb_d[0], bb_d[3] - bb_d[1]
+
+            row_h = max(th, dh, dot_r * 2 + 2)
+            pw = pad_x + dot_r * 2 + gap_dot + tw + gap_det + dw + pad_x
+            ph = pad_y + row_h + gap_bar + hbar + pad_y
+            pw = min(pw, max(80, ancho_f - 12))
+
+            img = _PilImage.new("RGBA", (pw, ph), (0, 0, 0, 0))
+            draw = _PilDraw.Draw(img, "RGBA")
+            rad = min(round(10 * k), ph // 2)
+            # Fondo glass oscuro + borde fino en color de acento
+            draw.rounded_rectangle(
+                [0, 0, pw - 1, ph - 1], radius=rad,
+                fill=(13, 18, 26, 220),
+                outline=(*accent_rgb, 155),
+                width=max(1, round(1.3 * k)),
+            )
+
+            # Punto de estado
+            dot_cx = pad_x + dot_r
+            dot_cy = pad_y + row_h // 2
+            draw.ellipse(
+                [dot_cx - dot_r, dot_cy - dot_r, dot_cx + dot_r, dot_cy + dot_r],
+                fill=(*accent_rgb, 255),
+            )
+
+            # Nombre del alumno
+            tx = pad_x + dot_r * 2 + gap_dot
+            ty = pad_y + (row_h - th) // 2 - bb_t[1]
+            draw.text((tx, ty), titulo, font=fuente_tit, fill=(248, 250, 252, 255))
+
+            # Porcentaje o estado a la derecha
+            if detalle:
+                dx = pw - pad_x - dw
+                dy = pad_y + (row_h - dh) // 2 - bb_d[1]
+                draw.text((dx, dy), detalle, font=fuente_det, fill=(*accent_rgb, 255))
+
+            # Barra de progreso redondeada integrada en la parte inferior
+            if progreso is not None:
+                bx1 = pad_x
+                bx2 = pw - pad_x
+                by1 = pad_y + row_h + gap_bar
+                by2 = by1 + hbar
+                br = hbar // 2
+                draw.rounded_rectangle(
+                    [bx1, by1, bx2, by2], radius=br, fill=(52, 63, 78, 235))
+                frac = min(max(float(progreso), 0.0), 1.0)
+                fill_w = max(hbar, int(round((bx2 - bx1) * frac)))
+                if frac > 0.005:
+                    draw.rounded_rectangle(
+                        [bx1, by1, min(bx2, bx1 + fill_w), by2],
+                        radius=br, fill=(*accent_rgb, 255))
+
+            gap_box = max(8, round(10 * k))
+            x = int(round(cx - pw / 2.0))
+            x = min(max(6, x), max(6, ancho_f - pw - 6))
+            y = int(round(y_top)) - ph - gap_box
+            if y < 6:
+                y = int(round(y_bot)) + gap_box
+                if y + ph > alto_f - 6:
+                    y = max(6, alto_f - ph - 6)
+            self._componer_rgba(frame, x, y, np.array(img))
+            return
+
+        # Fallback OpenCV si Pillow/fuente no estuviera disponible
+        texto = f"{titulo} {detalle}".strip()
+        escala = 0.52 * k
         grosor = max(1, round(k))
-        hbar = max(3, round(4 * k)) if progreso is not None else 0
         (tw, th), base = cv2.getTextSize(texto, cv2.FONT_HERSHEY_SIMPLEX, escala, grosor)
-        pad_x = round(9 * k)
+        pad_x = round(10 * k)
+        hbar = max(3, round(4 * k)) if progreso is not None else 0
         alto = round(th + base + 14 * k) + hbar
         ancho = tw + pad_x * 2
-        alto_f, ancho_f = frame.shape[:2]
-        b, g, r = color
-        lum = 0.114 * b + 0.587 * g + 0.299 * r
-        texto_color = CHIP_FONDO if lum > 140 else (255, 255, 255)
-        x = min(max(2, int(x)), max(2, ancho_f - ancho - 2))
-        y = int(y_borde) - alto
-        if y < 2:
-            y = int(y_borde)  # sin sitio arriba: dentro del box
-        # Fondo solido de la etiqueta
-        self._rect_alpha(frame, x, y, ancho, alto, color, 1.0)
-        # Texto centrado en la parte de texto (por encima de la franja)
+        x = min(max(6, int(round(cx - ancho / 2.0))), max(6, ancho_f - ancho - 6))
+        y = max(6, int(round(y_top)) - alto - round(8 * k))
+        self._rect_alpha(frame, x, y, ancho, alto, CHIP_FONDO, 0.84)
         cv2.putText(frame, texto, (x + pad_x, y + (alto - hbar - th - base) // 2 + th),
-                    cv2.FONT_HERSHEY_SIMPLEX, escala, texto_color, grosor, cv2.LINE_AA)
-        # Franja de progreso integrada en la base de la etiqueta
+                    cv2.FONT_HERSHEY_SIMPLEX, escala, CHIP_TEXTO, grosor, cv2.LINE_AA)
         if progreso is not None:
             ystrip = y + alto - hbar
-            self._rect_alpha(frame, x, ystrip, ancho, hbar, CHIP_FONDO, 0.55)
             wfill = max(round(2 * k), int(ancho * min(max(progreso, 0.0), 1.0)))
-            self._rect_alpha(frame, x, ystrip, wfill, hbar, (255, 255, 255), 1.0)
+            self._rect_alpha(frame, x, ystrip, wfill, hbar, color, 1.0)
 
     def _dibujar(self, frame, detecciones):
-        """Dibuja el overlay: esquinas suavizadas + etiqueta de estado.
-
-        Se invoca sobre el frame ya escalado a resolucion de visualizacion,
-        de modo que el resultado no depende de la resolucion de captura.
-        """
+        """Dibuja el overlay moderno: esquinas curvas, línea de escaneo y píldora glass."""
         k = self._factor_metrica(frame)
-        thick = max(2, round(3 * k))
         for det in detecciones:
             x1, y1, x2, y2 = [float(v) for v in det["caja"]]
-            m = 8 * k
+            m = 10 * k
             ax1, ay1, ax2, ay2 = x1 - m, y1 - m, x2 + m, y2 + m
-            L = max(18 * k, (ax2 - ax1) / 5.0, (ay2 - ay1) / 5.0)
             ident = det.get("identificado")
-            color = det.get("color") or (COLOR_IDENT if ident else COLOR_DESC)
-            p1 = (int(round(ax1)), int(round(ay1)))
-            p2 = (int(round(ax2)), int(round(ay2)))
-            esq_tl, esq_tr = p1, (p2[0], p1[1])
-            esq_bl, esq_br = (p1[0], p2[1]), p2
-            Lc = int(round(L))
-            cv2.line(frame, esq_tl, (esq_tl[0] + Lc, esq_tl[1]), color, thick, cv2.LINE_AA)
-            cv2.line(frame, esq_tl, (esq_tl[0], esq_tl[1] + Lc), color, thick, cv2.LINE_AA)
-            cv2.line(frame, esq_tr, (esq_tr[0] - Lc, esq_tr[1]), color, thick, cv2.LINE_AA)
-            cv2.line(frame, esq_tr, (esq_tr[0], esq_tr[1] + Lc), color, thick, cv2.LINE_AA)
-            cv2.line(frame, esq_bl, (esq_bl[0] + Lc, esq_bl[1]), color, thick, cv2.LINE_AA)
-            cv2.line(frame, esq_bl, (esq_bl[0], esq_bl[1] - Lc), color, thick, cv2.LINE_AA)
-            cv2.line(frame, esq_br, (esq_br[0] - Lc, esq_br[1]), color, thick, cv2.LINE_AA)
-            cv2.line(frame, esq_br, (esq_br[0], esq_br[1] - Lc), color, thick, cv2.LINE_AA)
+            confirmado = bool(det.get("confirmado"))
+            prog = det.get("progreso")
 
-            # Texto de la etiqueta segun el estado de la cara
-            nombre_txt = det["nombre"] if ident else "Desconocido"
+            if ident and confirmado:
+                color = COLOR_CONFIRM
+            elif ident:
+                color = COLOR_IDENT
+            else:
+                color = COLOR_DESC
+
+            # Esquinas curvas estilo FaceID
+            self._dibujar_esquinas_redondeadas(frame, ax1, ay1, ax2, ay2, color, k)
+
+            # Haz de escaneo sutil mientras se verifica
+            if ident and not confirmado and prog is not None:
+                self._dibujar_linea_escaneo(frame, ax1, ay1, ax2, ay2, color, k)
+
+            # Texto de la píldora flotante
+            nombre_raw = str(det.get("nombre") or "").strip() if ident else "Rostro no registrado"
+            if ident and nombre_raw.isupper():
+                nombre_txt = nombre_raw.title()
+            else:
+                nombre_txt = nombre_raw or "Alumno"
+
             if ident:
-                prog = det.get("progreso")
-                if det.get("confirmado"):
-                    texto, progreso = nombre_txt, None
+                if confirmado:
+                    detalle, progreso_bar = "Confirmado", None
                 elif prog is not None:
-                    texto = f"{nombre_txt} · {int(prog * 100)}%"
-                    progreso = prog
+                    detalle = f"{int(round(prog * 100))}%"
+                    progreso_bar = prog
                 else:
                     sim = max(0.0, min(1.0, float(det.get("sim", 0.0))))
-                    texto, progreso = f"{nombre_txt} · {sim * 100:.0f}%", None
+                    detalle, progreso_bar = f"{sim * 100:.0f}%", None
             else:
-                texto, progreso = "Desconocido", None
+                detalle, progreso_bar = "", None
 
-            self._tag(frame, ax1, ay1, texto, color, progreso)
+            cx = (ax1 + ax2) / 2.0
+            self._tag(frame, cx, ay1, ay2, nombre_txt, detalle, color, progreso_bar)
 
     def _es_url_http(self, fuente):
         return isinstance(fuente, str) and fuente.lower().startswith(("http://", "https://", "tcp://"))

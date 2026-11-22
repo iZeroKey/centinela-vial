@@ -17,14 +17,14 @@ import os, sys, time
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTableWidgetItem,
-    QHeaderView, QAbstractItemView, QBoxLayout, QFrame,
+    QHeaderView, QAbstractItemView, QBoxLayout, QFrame, QStackedWidget,
 )
 from qfluentwidgets import (
-    ComboBox, PushButton, LineEdit, DoubleSpinBox, SpinBox,
-    TableWidget, HeaderCardWidget, MessageBoxBase, SubtitleLabel, CaptionLabel,
-    SwitchButton, SwitchSettingCard, SettingCardGroup, SettingCard,
+    ComboBox, PushButton, PrimaryPushButton, LineEdit, DoubleSpinBox, SpinBox,
+    TableWidget, HeaderCardWidget, MessageBoxBase, SubtitleLabel, StrongBodyLabel,
+    CaptionLabel, SwitchButton, SwitchSettingCard, SettingCardGroup, SettingCard,
     PrimaryPushSettingCard, ScrollArea, CardWidget, TransparentToolButton,
-    FluentIcon as FIcon,
+    SegmentedWidget, IconWidget, FluentIcon as FIcon,
 )
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -382,7 +382,7 @@ class DialogoCamara(MessageBoxBase):
 
 
 class PanelConfiguracion(QWidget):
-    """Pestaña Configuración completa."""
+    """Pestaña Configuración separada por secciones (Cámaras, Asistencia, Red)."""
 
     def __init__(self, callbacks=None, parent=None):
         super().__init__(parent)
@@ -391,19 +391,75 @@ class PanelConfiguracion(QWidget):
         self._obtener_telefonos = self._cb.get("obtener_telefonos") or (lambda: {})
         self.cfg = config_app.cargar()
         self._trabajo_prueba = None
+        self._nombres_webcam = {}
+        self._webcams_detectadas = False
 
-        # El panel crece con las secciones: scroll transparente para no cortar
+        raiz = QVBoxLayout(self)
+        raiz.setContentsMargins(28, 20, 28, 24)
+        raiz.setSpacing(16)
+
+        # Cabecera principal
+        col_tit = QVBoxLayout()
+        col_tit.setSpacing(2)
+        lbl_tit = SubtitleLabel("Configuración", self)
+        lbl_desc = CaptionLabel(
+            "Administra las cámaras de vigilancia, los parámetros de reconocimiento y el servidor local.",
+            self)
+        lbl_desc.setStyleSheet("color: rgba(148, 163, 184, 0.95);")
+        col_tit.addWidget(lbl_tit)
+        col_tit.addWidget(lbl_desc)
+        raiz.addLayout(col_tit)
+
+        # Navegación segmentada por categorías
+        self.nav_config = SegmentedWidget(self)
+        self.stack_config = QStackedWidget(self)
+        self.stack_config.setStyleSheet("background: transparent;")
+
+        self.pag_camaras = self._envolver_scroll([self._construir_grupo_camaras()])
+        self.pag_asistencia = self._envolver_scroll([
+            self._construir_grupo_asistencia(),
+            self._construir_grupo_tardanzas(),
+        ])
+        self.pag_red = self._envolver_scroll([self._construir_grupo_web()])
+
+        self._paginas = {
+            "camaras": self.pag_camaras,
+            "asistencia": self.pag_asistencia,
+            "red": self.pag_red,
+        }
+        for widget in self._paginas.values():
+            self.stack_config.addWidget(widget)
+
+        self.nav_config.addItem(
+            "camaras", "Cámaras",
+            lambda: self._cambiar_seccion("camaras"), icon=FIcon.CAMERA)
+        self.nav_config.addItem(
+            "asistencia", "Asistencia y horarios",
+            lambda: self._cambiar_seccion("asistencia"), icon=FIcon.STOP_WATCH)
+        self.nav_config.addItem(
+            "red", "Red y servidor",
+            lambda: self._cambiar_seccion("red"), icon=FIcon.GLOBE)
+        self.nav_config.setCurrentItem("camaras")
+        self.stack_config.setCurrentWidget(self.pag_camaras)
+
+        raiz.addWidget(self.nav_config, 0, Qt.AlignmentFlag.AlignLeft)
+        raiz.addWidget(self.stack_config, 1)
+
+    def _cambiar_seccion(self, clave):
+        pag = self._paginas.get(clave)
+        if pag is not None:
+            self.stack_config.setCurrentWidget(pag)
+
+    def _envolver_scroll(self, widgets):
+        """Envuelve una lista de grupos en un ScrollArea transparente."""
         cuerpo = QWidget()
         cuerpo.setStyleSheet("background: transparent;")
-        layout = QVBoxLayout(cuerpo)
-        layout.setContentsMargins(28, 20, 28, 24)  # margenes tipo Ajustes de Win11
-        layout.setSpacing(20)
-
-        layout.addWidget(self._construir_grupo_camaras())
-        layout.addWidget(self._construir_grupo_asistencia())
-        layout.addWidget(self._construir_grupo_tardanzas())
-        layout.addWidget(self._construir_grupo_web())
-        layout.addStretch(1)
+        v = QVBoxLayout(cuerpo)
+        v.setContentsMargins(0, 4, 6, 12)
+        v.setSpacing(20)
+        for w in widgets:
+            v.addWidget(w)
+        v.addStretch(1)
 
         scroll = ScrollArea()
         scroll.setWidgetResizable(True)
@@ -411,19 +467,48 @@ class PanelConfiguracion(QWidget):
         scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
         scroll.setWidget(cuerpo)
         scroll.enableTransparentBackground()
-        externo = QVBoxLayout(self)
-        externo.setContentsMargins(0, 0, 0, 0)
-        externo.addWidget(scroll)
+        return scroll
 
     # ---------------- Cámaras ----------------
     def _construir_grupo_camaras(self):
         grupo = HeaderCardWidget()
-        grupo.setTitle("Cámaras (para vigilancia y captura de fotos)")
+        grupo.setTitle("Cámaras configuradas")
         grupo.viewLayout.setDirection(QBoxLayout.Direction.TopToBottom)
         v = grupo.viewLayout
         v.setContentsMargins(16, 12, 16, 16)
         v.setSpacing(12)
 
+        desc = CaptionLabel(
+            "Configura las webcams locales, cámaras IP/ESP32 o teléfonos usados para vigilancia y captura de fotos.")
+        desc.setWordWrap(True)
+        desc.setStyleSheet("color: rgba(148, 163, 184, 0.9);")
+        v.addWidget(desc)
+
+        self.stack_tabla_cam = QStackedWidget()
+        self.stack_tabla_cam.setStyleSheet("background: transparent;")
+
+        # Página 0: estado vacío sin cámaras
+        vacio = QWidget()
+        vacio.setStyleSheet("background: transparent;")
+        vv = QVBoxLayout(vacio)
+        vv.setContentsMargins(24, 36, 24, 36)
+        vv.setSpacing(8)
+        vv.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        ico_v = IconWidget(FIcon.CAMERA, vacio)
+        ico_v.setFixedSize(44, 44)
+        vv.addWidget(ico_v, 0, Qt.AlignmentFlag.AlignCenter)
+        tit_v = StrongBodyLabel("Sin cámaras configuradas", vacio)
+        vv.addWidget(tit_v, 0, Qt.AlignmentFlag.AlignCenter)
+        sub_v = CaptionLabel(
+            "Agrega una webcam local, un stream HTTP o un teléfono conectado para iniciar la vigilancia.",
+            vacio)
+        sub_v.setWordWrap(True)
+        sub_v.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        sub_v.setStyleSheet("color: rgba(139, 151, 168, 0.9);")
+        vv.addWidget(sub_v)
+        self.stack_tabla_cam.addWidget(vacio)
+
+        # Página 1: tabla de cámaras
         self.tabla_camaras = TableWidget()
         self.tabla_camaras.setRowCount(0)
         self.tabla_camaras.setColumnCount(5)
@@ -438,37 +523,54 @@ class PanelConfiguracion(QWidget):
         cab.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
         self.tabla_camaras.setColumnWidth(4, 92)
         self.tabla_camaras.verticalHeader().setVisible(False)
-        self.tabla_camaras.verticalHeader().setDefaultSectionSize(42)
+        self.tabla_camaras.verticalHeader().setDefaultSectionSize(44)
         self.tabla_camaras.setAlternatingRowColors(True)
         self.tabla_camaras.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.tabla_camaras.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.tabla_camaras.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        v.addWidget(self.tabla_camaras)
+        self.stack_tabla_cam.addWidget(self.tabla_camaras)
+
+        v.addWidget(self.stack_tabla_cam)
 
         fila_botones = QHBoxLayout()
         fila_botones.setSpacing(10)
-        btn_agregar = PushButton("Agregar")
+        btn_agregar = PrimaryPushButton(FIcon.ADD, "Agregar cámara")
         btn_agregar.clicked.connect(self._agregar_camara)
-        btn_editar = PushButton("Editar")
-        btn_editar.setObjectName("secundario")
-        btn_editar.clicked.connect(self._editar_camara)
-        btn_probar = PushButton("Probar conexión")
-        btn_probar.setObjectName("secundario")
-        btn_probar.clicked.connect(self._probar_camara)
-        btn_quitar = PushButton("Quitar")
-        btn_quitar.setObjectName("peligro")
-        btn_quitar.clicked.connect(self._quitar_camara)
-        for b in (btn_agregar, btn_editar, btn_probar, btn_quitar):
+        self.btn_editar_cam = PushButton(FIcon.EDIT, "Editar")
+        self.btn_editar_cam.setObjectName("secundario")
+        self.btn_editar_cam.clicked.connect(self._editar_camara)
+        self.btn_probar_cam = PushButton(FIcon.PLAY, "Probar conexión")
+        self.btn_probar_cam.setObjectName("secundario")
+        self.btn_probar_cam.clicked.connect(self._probar_camara)
+        self.btn_quitar_cam = PushButton(FIcon.DELETE, "Quitar")
+        self.btn_quitar_cam.setObjectName("peligro")
+        self.btn_quitar_cam.clicked.connect(self._quitar_camara)
+        for b in (btn_agregar, self.btn_editar_cam, self.btn_probar_cam, self.btn_quitar_cam):
             b.setMinimumHeight(34)
             fila_botones.addWidget(b, 1)
         v.addLayout(fila_botones)
 
-        self._refrescar_tabla()
+        self._refrescar_tabla(detectar=False)
         return grupo
 
-    def _refrescar_tabla(self):
+    def showEvent(self, event):
+        super().showEvent(event)
+        if not getattr(self, "_webcams_detectadas", False):
+            self._webcams_detectadas = True
+            self._refrescar_tabla(detectar=True)
+
+    def _refrescar_tabla(self, detectar=True):
         camaras = self.cfg.get("camaras", [])
-        self._nombres_webcam = dict(detectar_webcams_locales())
+        if detectar:
+            self._nombres_webcam = dict(detectar_webcams_locales())
+        hay = bool(camaras)
+        if hasattr(self, "stack_tabla_cam"):
+            self.stack_tabla_cam.setCurrentIndex(1 if hay else 0)
+        for btn in (getattr(self, "btn_editar_cam", None),
+                    getattr(self, "btn_probar_cam", None),
+                    getattr(self, "btn_quitar_cam", None)):
+            if btn is not None:
+                btn.setEnabled(hay)
         self.tabla_camaras.setRowCount(len(camaras))
         for i, cam in enumerate(camaras):
             valores = [
@@ -491,13 +593,12 @@ class PanelConfiguracion(QWidget):
             h.addWidget(sw)
             h.addStretch(1)
             self.tabla_camaras.setCellWidget(i, 4, contenedor)
-        if not camaras:
-            self.tabla_camaras.setRowCount(1)
-            self.tabla_camaras.setItem(0, 0, QTableWidgetItem("Sin cámaras configuradas"))
-            for col in range(1, 5):
-                self.tabla_camaras.setItem(0, col, QTableWidgetItem(""))
-        self.tabla_camaras.setFixedHeight(
-            min(260, 34 + max(1, len(camaras)) * 42 + 10))
+        if hay:
+            altura = min(340, 38 + len(camaras) * 44 + 12)
+            self.tabla_camaras.setFixedHeight(altura)
+            self.stack_tabla_cam.setFixedHeight(altura)
+        else:
+            self.stack_tabla_cam.setFixedHeight(190)
 
     def _toggle_camara(self, fila, activo):
         """Cambia el estado activo de una cámara y aplica el cambio."""
@@ -664,7 +765,7 @@ class PanelConfiguracion(QWidget):
             self.combo_modo, ancho=280))
         grupo.addSettingCard(self._tarjeta_control(
             FIcon.SYNC, "Procesar 1 de cada N frames",
-            "Balance entre fluidez y reconocimiento", self.spin_procesar))
+            "Balance entre fluidez y reconocimiento", self.spin_procesar, ancho=170))
 
         self.btn_guardar = PrimaryPushSettingCard(
             "Guardar parámetros", FIcon.SAVE, "Aplicar cambios",
@@ -683,43 +784,37 @@ class PanelConfiguracion(QWidget):
         return tarjeta
 
     def _guardar_parametros(self):
+        prev = self.cfg.get("asistencia", {})
         self.cfg["asistencia"] = {
             "umbral_similitud": float(self.spin_umbral.value()),
             "segundos_confirmacion": float(self.spin_confirm.value()),
             "intervalo_antiduplicado": int(self.spin_antidup.value()),
-            "umbral_lcd_nombre": float(self.cfg.get("asistencia", {}).get("umbral_lcd_nombre", 0.30)),
-            "duracion_resultado_lcd": float(self.cfg.get("asistencia", {}).get("duracion_resultado_lcd", 3.0)),
+            "umbral_lcd_nombre": float(prev.get("umbral_lcd_nombre", 0.30)),
+            "duracion_resultado_lcd": float(prev.get("duracion_resultado_lcd", 3.0)),
             "modo_escaneo": "uno" if self.combo_modo.currentIndex() == 0 else "varios",
             "procesar_cada_n": int(self.spin_procesar.value()),
-            "tolerancia_tardanza_min": int(self.spin_tolerancia.value()),
-            "aplicar_horarios": bool(self.cfg.get("asistencia", {}).get("aplicar_horarios", False)),
+            "tolerancia_tardanza_min": int(prev.get("tolerancia_tardanza_min", 5)),
+            "aplicar_horarios": bool(prev.get("aplicar_horarios", False)),
         }
         self._guardar_y("parametros_cambiados")
 
-    # ---------------- Tardanzas ----------------
+    # ---------------- Horarios de clase ----------------
     def _construir_grupo_tardanzas(self):
-        """Tolerancia de tardanza y aplicacion de horarios al marcado."""
-        grupo = SettingCardGroup("Tardanzas")
+        """Control de horarios al marcado (la tolerancia de tardanza se configura por curso/sección)."""
+        grupo = SettingCardGroup("Horarios y tardanzas")
 
-        self.spin_tolerancia = SpinBox()
-        self.spin_tolerancia.setRange(0, 60)
-        self.spin_tolerancia.setSuffix(" min")
-        self.spin_tolerancia.setValue(int(self.cfg.get("asistencia", {}).get(
-            "tolerancia_tardanza_min", 5)))
-        grupo.addSettingCard(self._tarjeta_control(
-            FIcon.STOP_WATCH, "Tolerancia de tardanza",
-            "Minutos de gracia tras el inicio de clase", self.spin_tolerancia,
-            ancho=120))
-
-        # Switch de aplicacion al marcado (4B): instantaneo, como los de camaras.
-        # La senal se conecta DESPUES de fijar el estado (setChecked emite).
         self.sw_aplicar = SwitchSettingCard(
             FIcon.CALENDAR, "Aplicar horarios al marcado",
-            "Solo registra asistencias dentro de la franja del curso")
+            "Solo registra asistencias dentro de la franja horaria del curso")
         self.sw_aplicar.setChecked(bool(self.cfg.get("asistencia", {}).get(
             "aplicar_horarios", False)))
         self.sw_aplicar.checkedChanged.connect(self._on_toggle_aplicar)
         grupo.addSettingCard(self.sw_aplicar)
+
+        nota_tol = SettingCard(
+            FIcon.STOP_WATCH, "Tolerancia de tardanza",
+            "Se configura de forma independiente por curso (y opcionalmente por sección) en «Cursos y horarios».")
+        grupo.addSettingCard(nota_tol)
         return grupo
 
     def _on_toggle_aplicar(self, checked):

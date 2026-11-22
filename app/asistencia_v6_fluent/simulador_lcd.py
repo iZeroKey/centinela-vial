@@ -46,11 +46,22 @@ class SimuladorLCD(HeaderCardWidget):
         self.lbl_pantalla.setMinimumHeight(60)
         layout.addWidget(self.lbl_pantalla, alignment=Qt.AlignmentFlag.AlignCenter)
 
+        self._ultimo_texto = None
         self._timer = QTimer(self)
         self._timer.timeout.connect(self.actualizar)
         self._timer.start(100)
 
         self.actualizar()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if not self._timer.isActive():
+            self._timer.start(100)
+        self.actualizar()
+
+    def hideEvent(self, event):
+        self._timer.stop()
+        super().hideEvent(event)
 
     def actualizar(self, datos=None):
         datos = datos or obtener_datos_lcd()
@@ -58,4 +69,7 @@ class SimuladorLCD(HeaderCardWidget):
         # Espacios no separables para que Qt no colapse los espacios finales
         f1 = fila_1.replace(" ", "\u00a0")
         f2 = fila_2.replace(" ", "\u00a0")
-        self.lbl_pantalla.setText(f"{f1}\n{f2}")
+        texto = f"{f1}\n{f2}"
+        if texto != self._ultimo_texto:
+            self._ultimo_texto = texto
+            self.lbl_pantalla.setText(texto)

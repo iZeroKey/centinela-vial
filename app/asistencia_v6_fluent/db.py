@@ -79,7 +79,13 @@ def _migrar_alumnos(cur):
         pass
 
 
+_db_inicializada = False
+
+
 def init_db():
+    global _db_inicializada
+    if _db_inicializada:
+        return
     con = _conectar()
     cur = con.cursor()
     cur.execute("""
@@ -127,22 +133,39 @@ def init_db():
         minutos     INTEGER DEFAULT 0,
         UNIQUE(alumno_id, fecha)
     )""")
+    cur.execute("""
+    CREATE INDEX IF NOT EXISTS idx_asistencia_alumno_entrada
+    ON asistencia(alumno_id, entrada)
+    """)
+    cur.execute("""
+    CREATE INDEX IF NOT EXISTS idx_permanencia_alumno_fecha
+    ON permanencia(alumno_id, fecha)
+    """)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS asistencia_manual (
+        alumno_id      TEXT NOT NULL,
+        curso          TEXT NOT NULL DEFAULT '',
+        seccion        TEXT NOT NULL DEFAULT '',
+        fecha          TEXT NOT NULL,
+        estado         TEXT NOT NULL,
+        hora           TEXT DEFAULT '',
+        actualizado_en TEXT DEFAULT '',
+        PRIMARY KEY (alumno_id, curso, seccion, fecha)
+    )""")
     con.commit()
     con.close()
+    _db_inicializada = True
 
 
-def sincronizar_alumnos(json_path):
-    """Lee alumnos.json y lo refleja en la tabla alumnos (insert o update).
-
-    El campo historico 'grupo' ya no se usa: se escribe vacio y la seccion
-    vive en la columna 'seccion' (espejo de la primera inscripcion).
-    """
+def sincronizar_alumnos(json_path, alumnos=None):
+    """Lee alumnos.json (o usa `alumnos` si ya se cargó) y lo refleja en SQLite."""
     init_db()
-    with open(json_path, encoding="utf-8") as f:
-        data = json.load(f)
+    if alumnos is None:
+        with open(json_path, encoding="utf-8") as f:
+            alumnos = json.load(f).get("alumnos", [])
     con = _conectar()
     cur = con.cursor()
-    for a in data.get("alumnos", []):
+    for a in alumnos:
         cur.execute("""
         INSERT INTO alumnos (alumno_id, nombre, apellidos, dni, fecha_nacimiento, sexo,
             telefono, email, tutor_nombre, tutor_telefono, direccion, curso, grupo, seccion,
@@ -278,6 +301,34 @@ def obtener_estado_hoy():
     return obtener_estado_fecha(datetime.now().strftime("%Y-%m-%d"))
 
 
+def obtener_estado_alumno_hoy(alumno_id):
+    """Estado de asistencia de hoy para un solo alumno (consulta indexada)."""
+    if not alumno_id:
+        return None
+    init_db()
+    hoy = datetime.now().strftime("%Y-%m-%d")
+    con = _conectar()
+    cur = con.cursor()
+    cur.execute("""
+        SELECT COUNT(*) AS marcas,
+               MIN(entrada) AS primera_entrada,
+               MAX(entrada) AS ultima_entrada,
+               MAX(salida) AS ultima_salida
+        FROM asistencia
+        WHERE alumno_id=? AND entrada >= ? AND entrada < ?
+    """, (alumno_id, hoy, hoy + "\uffff"))
+    row = cur.fetchone()
+    con.close()
+    if row is None:
+        return {
+            "marcas": 0,
+            "primera_entrada": None,
+            "ultima_entrada": None,
+            "ultima_salida": None,
+        }
+    return dict(row)
+
+
 def obtener_estado_fecha(fecha):
     """
     Devuelve lista de alumnos activos con su estado en una fecha dada (YYYY-MM-DD).
@@ -371,3 +422,87 @@ def obtener_historial_rango(fecha_ini, fecha_fin):
     filas = [dict(r) for r in cur.fetchall()]
     con.close()
     return filas
+
+
+def guardar_asistencia_manual(alumno_id, curso, seccion, fecha, estado, hora=""):
+    """Guarda o actualiza un ajuste manual de asistencia para (alumno, curso, seccion, fecha)."""
+    init_db()
+    curso = str(curso or "").strip()
+    seccion = str(seccion or "").strip()
+    fecha = str(fecha or "")[:10]
+    estado = str(estado or "").strip()
+    hora = str(hora or "").strip()[:5]
+    ahora = datetime.now().isoformat()
+    con = _conectar()
+    cur = con.cursor()
+    cur.execute("""
+        INSERT INTO asistencia_manual (alumno_id, curso, seccion, fecha, estado, hora, actualizado_en)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(alumno_id, curso, seccion, fecha) DO UPDATE SET
+            estado=excluded.estado,
+            hora=excluded.hora,
+            actualizado_en=excluded.actualizado_en
+    """, (alumno_id, curso, seccion, fecha, estado, hora, ahora))
+    con.commit()
+    con.close()
+
+
+def eliminar_asistencia_manual(alumno_id, curso, seccion, fecha):
+    """Elimina un ajuste manual y restaura el cálculo automático."""
+    init_db()
+    con = _conectar()
+    cur = con.cursor()
+    cur.execute("""
+        DELETE FROM asistencia_manual
+        WHERE alumno_id=? AND curso=? AND seccion=? AND fecha=?
+    """, (alumno_id, str(curso or "").strip(), str(seccion or "").strip(), str(fecha or "")[:10]))
+    con.commit()
+    con.close()
+
+
+def obtener_contexto_historial(hoy):
+    """Obtiene en una sola conexión (primer_dia, marcas_hasta_hoy, alumnos_activos, manuales)."""
+    init_db()
+    con = _conectar()
+    cur = con.cursor()
+    cur.execute("SELECT MIN(date(entrada)) AS fecha FROM asistencia")
+    fila = cur.fetchone()
+    primer = fila["fecha"] if fila else None
+    marcas = []
+    if primer:
+        cur.execute("""
+            SELECT a.alumno_id, a.nombre, a.apellidos,
+                   date(x.entrada) AS fecha,
+                   MIN(x.entrada) AS entrada,
+                   (SELECT MAX(x2.salida) FROM asistencia x2
+                     WHERE x2.alumno_id = a.alumno_id
+                       AND date(x2.entrada) = date(x.entrada)) AS salida,
+                   (SELECT p.minutos FROM permanencia p
+                     WHERE p.alumno_id = a.alumno_id
+                       AND p.fecha = date(x.entrada)) AS minutos,
+                   (SELECT x3.confianza FROM asistencia x3
+                     WHERE x3.alumno_id = a.alumno_id
+                       AND date(x3.entrada) = date(x.entrada)
+                     ORDER BY x3.entrada LIMIT 1) AS confianza,
+                   COUNT(x.id) AS marcas
+            FROM alumnos a
+            JOIN asistencia x ON x.alumno_id = a.alumno_id
+            WHERE a.estado = 'activo' AND date(x.entrada) BETWEEN ? AND ?
+            GROUP BY a.alumno_id, date(x.entrada)
+        """, (primer, hoy))
+        marcas = [dict(r) for r in cur.fetchall()]
+    cur.execute("SELECT * FROM alumnos WHERE estado='activo'")
+    activos = [dict(r) for r in cur.fetchall()]
+    cur.execute("""
+        SELECT alumno_id, curso, seccion, fecha, estado, hora
+        FROM asistencia_manual
+    """)
+    manuales = {
+        (r["alumno_id"], r["curso"], r["seccion"], r["fecha"]): {
+            "estado": r["estado"],
+            "hora": r["hora"] or "",
+        }
+        for r in cur.fetchall()
+    }
+    con.close()
+    return primer, marcas, activos, manuales

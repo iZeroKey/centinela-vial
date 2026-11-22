@@ -171,7 +171,16 @@ class PanelDispositivos(QWidget):
         self._temporizador = QTimer(self)
         self._temporizador.setInterval(int(self.refresco_seg * 1000))
         self._temporizador.timeout.connect(self.refrescar)
-        self._temporizador.start()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.refrescar()
+        if not self._temporizador.isActive():
+            self._temporizador.start()
+
+    def hideEvent(self, event):
+        self._temporizador.stop()
+        super().hideEvent(event)
 
     # ------------------------------------------------------------------
     def cambiar_estado(self, tel_id, estado):

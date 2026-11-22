@@ -23,18 +23,14 @@ Requisitos:
   - torch, torchvision, opencv, numpy
 """
 
-import os, sys, threading, cv2, numpy as np, torch
+import os, sys, threading, cv2, numpy as np
 
 # --- Detector alternativo para pruebas ---
 # USAR_MEDIAPIPE = True  -> usa MediaPipe Face Detection (mas rapido, mas robusto)
 # USAR_MEDIAPIPE = False -> usa detector_seg2 propio (modelo original, comentado abajo)
 USAR_MEDIAPIPE = False
-try:
-    import mediapipe as _mp
-    _MEDIAPIPE_OK = True
-except Exception:
-    _MEDIAPIPE_OK = False
-    USAR_MEDIAPIPE = False
+_mp = None
+_MEDIAPIPE_OK = False
 
 # ---- rutas del proyecto (relativas a este archivo) ----
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -44,17 +40,36 @@ _DETECTOR_PTH = os.path.join(_ROOT, "models", "ocular_v2", "detector_seg2", "bes
 IN_W, IN_H = 640, 480
 STRIDES = [8, 16, 32]
 ANCHORS = {8: [16, 32, 64], 16: [32, 64, 128], 32: [64, 128, 256]}
-MEAN = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
-STD = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
 
 # cara mínima aceptable (px en imagen original)
 MIN_CARA_PX = 60
 
+_torch_mod = None
+_MEAN = None
+_STD = None
 _device = None
 _detw = None
 _modelo_det = None
 _modelo_emb = None
 _lock_modelos = threading.Lock()
+
+
+def _torch():
+    """Import perezoso de PyTorch para no frenar el arranque de la GUI (~7 s)."""
+    global _torch_mod
+    if _torch_mod is None:
+        import torch as _t
+        _torch_mod = _t
+    return _torch_mod
+
+
+def _mean_std():
+    global _MEAN, _STD
+    if _MEAN is None:
+        t = _torch()
+        _MEAN = t.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
+        _STD = t.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
+    return _MEAN, _STD
 
 
 def _cargar_detw():
@@ -75,6 +90,7 @@ def _cargar_detw():
 def _device_actual():
     global _device
     if _device is None:
+        torch = _torch()
         _device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     return _device
 
@@ -87,6 +103,7 @@ def cargar_detector():
     with _lock_modelos:
         if _modelo_det is not None:  # doble chequeo: otro hilo pudo cargar
             return _detw, _modelo_det, _device_actual()
+        torch = _torch()
         detw = _cargar_detw()
         modelo = detw.Detector().to(_device_actual())
         saved = torch.load(_DETECTOR_PTH, map_location="cpu")
@@ -98,11 +115,13 @@ def cargar_detector():
 
 def preprocess_det(frame_bgr):
     """BGR -> tensor normalizado listo para el detector. Devuelve (tensor, w0, h0)."""
+    torch = _torch()
+    mean, std = _mean_std()
     rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
     h0, w0 = rgb.shape[:2]
     im = cv2.resize(rgb, (IN_W, IN_H), interpolation=cv2.INTER_LINEAR)
     t = torch.from_numpy(im.astype(np.float32) / 255.0).permute(2, 0, 1)
-    t = (t - MEAN) / STD
+    t = (t - mean) / std
     return t, w0, h0
 
 
@@ -111,11 +130,19 @@ _mp_face_detector = None
 
 def _cargar_mediapipe_detector():
     """Carga (lazy) el detector de caras de MediaPipe."""
-    global _mp_face_detector
+    global _mp_face_detector, _mp, _MEDIAPIPE_OK
     if _mp_face_detector is not None:
         return _mp_face_detector
-    if not _MEDIAPIPE_OK:
+    if not USAR_MEDIAPIPE:
         return None
+    if _mp is None:
+        try:
+            import mediapipe as mp_mod
+            _mp = mp_mod
+            _MEDIAPIPE_OK = True
+        except Exception:
+            _MEDIAPIPE_OK = False
+            return None
     _mp_face_detector = _mp.solutions.face_detection.FaceDetection(
         model_selection=0, min_detection_confidence=0.5)
     return _mp_face_detector
@@ -153,10 +180,13 @@ def detectar_caras(frame_bgr, thr=0.5):
     Devuelve lista de tuplas: [(x1, y1, x2, y2, score), ...]
     en coordenadas de la imagen original.
     """
-    if USAR_MEDIAPIPE and _MEDIAPIPE_OK:
-        return detectar_caras_mediapipe(frame_bgr, thr=thr)
+    if USAR_MEDIAPIPE:
+        caras = detectar_caras_mediapipe(frame_bgr, thr=thr)
+        if _MEDIAPIPE_OK:
+            return caras
 
     # --- Modelo original (detector_seg2) ---
+    torch = _torch()
     detw, modelo, dev = cargar_detector()
     t, w0, h0 = preprocess_det(frame_bgr)
     with torch.no_grad():
@@ -211,6 +241,7 @@ def recorte_cara(frame_bgr, caja, margen=0.25):
 
 def preparar_para_embedding(cara_bgr, size=160):
     """BGR recorte -> tensor RGB 160x160 normalizado para FaceNet."""
+    torch = _torch()
     rgb = cv2.cvtColor(cara_bgr, cv2.COLOR_BGR2RGB)
     rgb = cv2.resize(rgb, (size, size), interpolation=cv2.INTER_LINEAR)
     t = torch.from_numpy(rgb.astype(np.float32) / 255.0).permute(2, 0, 1)
@@ -223,6 +254,7 @@ def extraer_embedding(cara_bgr):
     """
     Devuelve vector 512-d (numpy) normalizado L2, o None si falla.
     """
+    torch = _torch()
     modelo = cargar_embedding_modelo()
     t = preparar_para_embedding(cara_bgr).unsqueeze(0).to(_device_actual())
     with torch.no_grad():
