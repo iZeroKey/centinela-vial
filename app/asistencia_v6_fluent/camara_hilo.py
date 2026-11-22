@@ -44,6 +44,8 @@ except Exception:
     _HAS_PIL = False
 
 _PIL_FONT_CACHE = {}
+_MASK_ESQ_CACHE = {}
+_HUD_MEASURE_DRAW = _PilDraw.Draw(_PilImage.new("RGBA", (1, 1))) if _HAS_PIL else None
 
 
 def _cargar_fuente_hud(px, negrita=True):
@@ -103,6 +105,230 @@ class _Track:
         self.confirmado = False
 
 
+class _FiltroOneEuro:
+    """Filtro adaptativo 1-Euro: firme cuando el rostro está quieto, ágil al moverse."""
+
+    def __init__(self, min_cutoff=1.4, beta=6.5, d_cutoff=1.0):
+        self.min_cutoff = float(min_cutoff)
+        self.beta = float(beta)
+        self.d_cutoff = float(d_cutoff)
+        self._x = None
+        self._dx = 0.0
+
+    @staticmethod
+    def _alpha(cutoff, dt):
+        tau = 1.0 / (2.0 * math.pi * max(1e-4, cutoff))
+        return 1.0 / (1.0 + tau / dt)
+
+    def filtrar(self, x_obj, dt):
+        x_obj = float(x_obj)
+        if self._x is None:
+            self._x = x_obj
+            self._dx = 0.0
+            return x_obj
+        dt = max(1e-3, min(0.25, float(dt)))
+        a_d = self._alpha(self.d_cutoff, dt)
+        dx_raw = (x_obj - self._x) / dt
+        self._dx = a_d * dx_raw + (1.0 - a_d) * self._dx
+        cutoff = self.min_cutoff + self.beta * abs(self._dx)
+        a = self._alpha(cutoff, dt)
+        self._x = a * x_obj + (1.0 - a) * self._x
+        return self._x
+
+
+class _EstadoVisualRostro:
+    """Estado interpolado de un rostro para renderizar el HUD a 30+ fps sin tirones."""
+
+    def __init__(self, det, ahora):
+        cx, cy, bw, bh = self._de_caja(det["caja_norm"])
+        self.f_cx = _FiltroOneEuro(min_cutoff=1.4, beta=6.5)
+        self.f_cy = _FiltroOneEuro(min_cutoff=1.4, beta=6.5)
+        self.f_bw = _FiltroOneEuro(min_cutoff=1.1, beta=4.0)
+        self.f_bh = _FiltroOneEuro(min_cutoff=1.1, beta=4.0)
+        self.cx = self.f_cx.filtrar(cx, 0.033)
+        self.cy = self.f_cy.filtrar(cy, 0.033)
+        self.bw = self.f_bw.filtrar(bw, 0.033)
+        self.bh = self.f_bh.filtrar(bh, 0.033)
+        self.obj = (cx, cy, bw, bh)
+
+        self.alumno_id = det.get("alumno_id")
+        self.identificado = bool(det.get("identificado"))
+        self.nombre = det.get("nombre", "")
+        self.sim = float(det.get("sim", 0.0))
+        self.confirmado = bool(det.get("confirmado"))
+        self.progreso_obj = det.get("progreso")
+        self.progreso_vis = float(self.progreso_obj) if self.progreso_obj is not None else 0.0
+
+        c_ini = self._color_objetivo()
+        self.color_vis = [float(c_ini[0]), float(c_ini[1]), float(c_ini[2])]
+
+        self.opacidad = 0.0
+        self.escala = 1.07
+        self.activo = True
+        self.t_visto = ahora
+        self.t_confirmado = ahora if self.confirmado else None
+
+    @staticmethod
+    def _de_caja(caja_norm):
+        x1, y1, x2, y2 = caja_norm
+        return (x1 + x2) * 0.5, (y1 + y2) * 0.5, max(0.01, x2 - x1), max(0.01, y2 - y1)
+
+    def _color_objetivo(self):
+        if self.identificado and self.confirmado:
+            return COLOR_CONFIRM
+        if self.identificado:
+            return COLOR_IDENT
+        return COLOR_DESC
+
+    def actualizar_objetivo(self, det, ahora):
+        self.obj = self._de_caja(det["caja_norm"])
+        estaba_conf = self.confirmado
+        self.alumno_id = det.get("alumno_id")
+        self.identificado = bool(det.get("identificado"))
+        self.nombre = det.get("nombre", "")
+        self.sim = float(det.get("sim", 0.0))
+        self.confirmado = bool(det.get("confirmado"))
+        self.progreso_obj = det.get("progreso")
+        if self.confirmado and not estaba_conf:
+            self.t_confirmado = ahora
+        elif not self.confirmado:
+            self.t_confirmado = None
+        self.activo = True
+        self.t_visto = ahora
+
+    def paso(self, dt, ahora, confirm_seg):
+        dt = max(1e-3, min(0.15, float(dt)))
+        ocx, ocy, obw, obh = self.obj
+        self.cx = self.f_cx.filtrar(ocx, dt)
+        self.cy = self.f_cy.filtrar(ocy, dt)
+        self.bw = self.f_bw.filtrar(obw, dt)
+        self.bh = self.f_bh.filtrar(obh, dt)
+
+        # Opacidad: fade-in rápido, espera corta (evita parpadeo) y fade-out suave
+        if self.activo:
+            self.opacidad = min(1.0, self.opacidad + dt / 0.16)
+        else:
+            sin_ver = ahora - self.t_visto
+            if sin_ver > 0.22:
+                self.opacidad = max(0.0, self.opacidad - dt / 0.22)
+
+        # Escala de encaje inicial (1.07 -> 1.0) + micro-pulso al confirmar
+        k_esc = 1.0 - math.exp(-14.0 * dt)
+        self.escala += (1.0 - self.escala) * k_esc
+        factor_escala = self.escala
+        if self.t_confirmado is not None:
+            dt_conf = ahora - self.t_confirmado
+            if 0.0 <= dt_conf < 0.36:
+                factor_escala *= 1.0 - 0.035 * math.sin(math.pi * (dt_conf / 0.36))
+
+        # Transición suave de color (p.ej. teal -> esmeralda)
+        c_obj = self._color_objetivo()
+        k_col = 1.0 - math.exp(-10.0 * dt)
+        for i in range(3):
+            self.color_vis[i] += (float(c_obj[i]) - self.color_vis[i]) * k_col
+
+        # Progreso fluido entre inferencias
+        if self.identificado and self.progreso_obj is not None:
+            if self.confirmado:
+                objetivo_p = 1.0
+            else:
+                avance_extra = min(0.06, max(0.0, (ahora - self.t_visto) / max(0.5, float(confirm_seg))))
+                objetivo_p = min(1.0, float(self.progreso_obj) + avance_extra)
+            k_p = 1.0 - math.exp(-12.0 * dt)
+            self.progreso_vis += (objetivo_p - self.progreso_vis) * k_p
+        elif self.confirmado:
+            self.progreso_vis = 1.0
+
+        return factor_escala
+
+
+class _SuavizadorHUD:
+    """Administra la transición suave de posición, progreso, color y opacidad de todos los rostros."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._estados = []
+        self._confirm_seg = CONFIRM_SEG
+
+    def limpiar(self):
+        with self._lock:
+            self._estados.clear()
+
+    def actualizar_objetivos(self, detecciones_norm, confirm_seg=CONFIRM_SEG):
+        ahora = time.monotonic()
+        with self._lock:
+            self._confirm_seg = max(0.5, float(confirm_seg or CONFIRM_SEG))
+            usados = set()
+            for det in (detecciones_norm or []):
+                aid = det.get("alumno_id") if det.get("identificado") else None
+                cx, cy, _w, _h = _EstadoVisualRostro._de_caja(det["caja_norm"])
+
+                # 1. Emparejar por alumno_id
+                mejor_idx = None
+                if aid:
+                    for idx, est in enumerate(self._estados):
+                        if idx not in usados and est.alumno_id == aid:
+                            mejor_idx = idx
+                            break
+
+                # 2. Emparejar por cercanía espacial
+                if mejor_idx is None:
+                    mejor_d = 0.22
+                    for idx, est in enumerate(self._estados):
+                        if idx in usados:
+                            continue
+                        d = math.hypot(cx - est.cx, cy - est.cy)
+                        if d < mejor_d:
+                            mejor_d = d
+                            mejor_idx = idx
+
+                if mejor_idx is not None:
+                    self._estados[mejor_idx].actualizar_objetivo(det, ahora)
+                    usados.add(mejor_idx)
+                else:
+                    self._estados.append(_EstadoVisualRostro(det, ahora))
+                    usados.add(len(self._estados) - 1)
+
+            for idx, est in enumerate(self._estados):
+                if idx not in usados:
+                    est.activo = False
+
+    def paso(self, ancho, alto, dt):
+        ahora = time.monotonic()
+        salida = []
+        with self._lock:
+            vivos = []
+            for est in self._estados:
+                factor_esc = est.paso(dt, ahora, self._confirm_seg)
+                if not est.activo and est.opacidad <= 0.015:
+                    continue
+                vivos.append(est)
+                hw = est.bw * 0.5 * factor_esc * ancho
+                hh = est.bh * 0.5 * factor_esc * alto
+                cx_px = est.cx * ancho
+                cy_px = est.cy * alto
+                prog = (
+                    est.progreso_vis
+                    if (est.identificado and est.progreso_obj is not None)
+                    else None
+                )
+                salida.append({
+                    "nombre": est.nombre,
+                    "sim": est.sim,
+                    "caja": (cx_px - hw, cy_px - hh, cx_px + hw, cy_px + hh),
+                    "identificado": est.identificado,
+                    "alumno_id": est.alumno_id,
+                    "color": (int(round(est.color_vis[0])),
+                              int(round(est.color_vis[1])),
+                              int(round(est.color_vis[2]))),
+                    "progreso": prog,
+                    "confirmado": est.confirmado,
+                    "opacidad": est.opacidad,
+                })
+            self._estados = vivos
+        return salida
+
+
 class CamaraHilo(QThread):
     frame_listo = pyqtSignal(object, list)
     progreso_cara = pyqtSignal(int, float, str, str, tuple)
@@ -134,9 +360,7 @@ class CamaraHilo(QThread):
 
         self._ultimo_frame = None
         self._ultimas_detecciones = []
-        self._tracker = None
-        self._tracker_box = None
-        self._tracker_ok = False
+        self._suavizador = _SuavizadorHUD()
         self._mjpeg_buf = b""
         self._intentos_reconexion = 0
         self._t_inicio_fallo = None
@@ -182,6 +406,7 @@ class CamaraHilo(QThread):
         self._ultimo_frame = None
         self._ultimo_frame_ts = 0.0
         self._ultimas_detecciones = []
+        self._suavizador.limpiar()
         self._mjpeg_buf = b""
         self._intentos_reconexion = 0
         self._t_inicio_fallo = None
@@ -194,20 +419,34 @@ class CamaraHilo(QThread):
             self._reader_thread.start()
 
             t_prev = time.time()
+            t_ultimo_emit = 0.0
             self._t_ultimo_log_med = 0.0
             ultimo_frame_consumido = None
             while self._corriendo:
                 # Consumir frame de la cola (sin bloquear)
                 frame = None
+                frame_nuevo = False
                 try:
                     frame = self._frame_queue.get_nowait()
                     ultimo_frame_consumido = frame
+                    frame_nuevo = True
                 except queue.Empty:
                     frame = ultimo_frame_consumido
 
                 if frame is None:
                     self.msleep(30)
                     continue
+
+                ahora_m = time.monotonic()
+                if not frame_nuevo and t_ultimo_emit > 0.0 and (ahora_m - t_ultimo_emit) < 0.030:
+                    self.msleep(8)
+                    continue
+
+                dt_emit = (
+                    0.033 if t_ultimo_emit <= 0.0
+                    else max(0.005, min(0.15, ahora_m - t_ultimo_emit))
+                )
+                t_ultimo_emit = ahora_m
 
                 ahora = time.time()
                 dt = ahora - t_prev
@@ -227,41 +466,16 @@ class CamaraHilo(QThread):
                         args=(frame_copia, dt), daemon=True)
                     self._worker.start()
 
-                # Mientras se procesa, dibujar las ultimas anotaciones sobre el
-                # frame crudo para mantener el preview fluido sin parpadeo.
-                # Mostrar el ultimo frame anotado (congelado durante procesamiento)
-                # para que el recuadro no salte a una posicion vieja.
-                mostrar = self._ultimo_frame if self._ultimo_frame is not None else frame
-
-                # Emitir preview solo 1 de cada 2 frames para reducir overhead
-                # de serializacion de arrays en las señales PyQt.
                 mostrar, _d = self._preparar_display(frame, [])
-                dets = list(self._ultimas_detecciones)
-                # Actualizar tracker para suavizar el recuadro entre detecciones.
-                if self._tracker is not None and self._tracker_ok and dets:
+                mh, mw = mostrar.shape[:2]
+                dets_vis = self._suavizador.paso(mw, mh, dt_emit)
+                if dets_vis:
                     try:
-                        ok, box = self._tracker.update(frame)
-                        if ok:
-                            x, y, w, h = [int(v) for v in box]
-                            fh, fw = frame.shape[:2]
-                            mh, mw = mostrar.shape[:2]
-                            sx = mw / float(fw)
-                            sy = mh / float(fh)
-                            rx, ry = int(x * sx), int(y * sy)
-                            rw, rh = int(w * sx), int(h * sy)
-                            # Reutilizar el estilo original con la caja suavizada.
-                            dets = [dict(d) for d in dets]
-                            dets[0]["caja"] = (rx, ry, rx + rw, ry + rh)
-                        else:
-                            self._tracker_ok = False
-                    except Exception:
-                        self._tracker_ok = False
-                if dets:
-                    try:
-                        self._dibujar(mostrar, dets)
+                        self._dibujar(mostrar, dets_vis)
                     except Exception:
                         pass
-                self.frame_listo.emit(mostrar, dets)
+                self._ultimas_detecciones = dets_vis
+                self.frame_listo.emit(mostrar, dets_vis)
                 self.msleep(1)
         except Exception as e:
             self.error.emit(str(e))
@@ -443,55 +657,141 @@ class CamaraHilo(QThread):
         frame[y1:y2, x1:x2] = np.clip(
             bgr_patch * alpha + roi * (1.0 - alpha), 0, 255).astype(np.uint8)
 
-    def _dibujar_esquinas_redondeadas(self, frame, ax1, ay1, ax2, ay2, color, k):
-        """Esquinas curvas estilo FaceID con sombra sutil para contraste en cualquier fondo."""
+    def _dibujar_esquinas_redondeadas(self, frame, ax1, ay1, ax2, ay2, color, k, opacidad=1.0):
+        """Esquinas curvas antialias estilo FaceID con halo translúcido y sombra suave."""
+        opacidad = max(0.0, min(1.0, float(opacidad)))
+        if opacidad <= 0.01:
+            return
         x1, y1 = int(round(ax1)), int(round(ay1))
         x2, y2 = int(round(ax2)), int(round(ay2))
         bw, bh = max(1, x2 - x1), max(1, y2 - y1)
-        r = max(8, min(22, int(round(min(bw, bh) * 0.13))))
-        L = max(r + 8, int(round(min(bw, bh) * 0.24)))
+        if bw < 16 or bh < 16:
+            return
+        r = max(6, min(22, int(round(min(bw, bh) * 0.13))))
+        L = max(r + 6, int(round(min(bw, bh) * 0.24)))
         L = min(L, bw // 2 - 2, bh // 2 - 2)
-        r = min(r, max(4, L - 2))
-        thick = max(2, round(2.6 * k))
+        r = min(r, max(3, L - 2))
+        thick = max(2, round(2.5 * k))
 
-        def _trazar(col, grosor):
-            # Superior izquierda
-            cv2.ellipse(frame, (x1 + r, y1 + r), (r, r), 180, 0, 90, col, grosor, cv2.LINE_AA)
-            cv2.line(frame, (x1 + r, y1), (x1 + L, y1), col, grosor, cv2.LINE_AA)
-            cv2.line(frame, (x1, y1 + r), (x1, y1 + L), col, grosor, cv2.LINE_AA)
-            # Superior derecha
-            cv2.ellipse(frame, (x2 - r, y1 + r), (r, r), 270, 0, 90, col, grosor, cv2.LINE_AA)
-            cv2.line(frame, (x2 - L, y1), (x2 - r, y1), col, grosor, cv2.LINE_AA)
-            cv2.line(frame, (x2, y1 + r), (x2, y1 + L), col, grosor, cv2.LINE_AA)
-            # Inferior izquierda
-            cv2.ellipse(frame, (x1 + r, y2 - r), (r, r), 90, 0, 90, col, grosor, cv2.LINE_AA)
-            cv2.line(frame, (x1 + r, y2), (x1 + L, y2), col, grosor, cv2.LINE_AA)
-            cv2.line(frame, (x1, y2 - L), (x1, y2 - r), col, grosor, cv2.LINE_AA)
-            # Inferior derecha
-            cv2.ellipse(frame, (x2 - r, y2 - r), (r, r), 0, 0, 90, col, grosor, cv2.LINE_AA)
-            cv2.line(frame, (x2 - L, y2), (x2 - r, y2), col, grosor, cv2.LINE_AA)
-            cv2.line(frame, (x2, y2 - L), (x2, y2 - r), col, grosor, cv2.LINE_AA)
+        pad = thick + 5
+        q = pad + L + 2
+        S = 2 * q
+        clave_mask = (r, L, thick)
+        cache_item = _MASK_ESQ_CACHE.get(clave_mask)
+        if cache_item is None:
+            sx1, sy1 = pad, pad
+            sx2, sy2 = S - pad, S - pad
 
-        # Halo oscuro muy fino detrás para legibilidad sobre paredes claras
-        _trazar((16, 18, 22), thick + 2)
-        _trazar(color, thick)
+            def _trazar_mask(mask, dx, dy, grosor):
+                cx1, cy1 = sx1 + dx, sy1 + dy
+                cx2, cy2 = sx2 + dx, sy2 + dy
+                cv2.ellipse(mask, (cx1 + r, cy1 + r), (r, r), 0, 180, 270, 255, grosor, cv2.LINE_AA)
+                cv2.line(mask, (cx1 + r, cy1), (cx1 + L, cy1), 255, grosor, cv2.LINE_AA)
+                cv2.line(mask, (cx1, cy1 + r), (cx1, cy1 + L), 255, grosor, cv2.LINE_AA)
 
-    def _dibujar_linea_escaneo(self, frame, ax1, ay1, ax2, ay2, color, k):
-        """Haz horizontal sutil que recorre el rostro mientras se verifica."""
-        x1 = int(round(ax1)) + max(6, round(8 * k))
-        x2 = int(round(ax2)) - max(6, round(8 * k))
+                cv2.ellipse(mask, (cx2 - r, cy1 + r), (r, r), 0, 270, 360, 255, grosor, cv2.LINE_AA)
+                cv2.line(mask, (cx2 - L, cy1), (cx2 - r, cy1), 255, grosor, cv2.LINE_AA)
+                cv2.line(mask, (cx2, cy1 + r), (cx2, cy1 + L), 255, grosor, cv2.LINE_AA)
+
+                cv2.ellipse(mask, (cx2 - r, cy2 - r), (r, r), 0, 0, 90, 255, grosor, cv2.LINE_AA)
+                cv2.line(mask, (cx2 - L, cy2), (cx2 - r, cy2), 255, grosor, cv2.LINE_AA)
+                cv2.line(mask, (cx2, cy2 - L), (cx2, cy2 - r), 255, grosor, cv2.LINE_AA)
+
+                cv2.ellipse(mask, (cx1 + r, cy2 - r), (r, r), 0, 90, 180, 255, grosor, cv2.LINE_AA)
+                cv2.line(mask, (cx1 + r, cy2), (cx1 + L, cy2), 255, grosor, cv2.LINE_AA)
+                cv2.line(mask, (cx1, cy2 - L), (cx1, cy2 - r), 255, grosor, cv2.LINE_AA)
+
+            m_shadow = np.zeros((S, S), dtype=np.uint8)
+            m_glow = np.zeros((S, S), dtype=np.uint8)
+            m_main = np.zeros((S, S), dtype=np.uint8)
+            _trazar_mask(m_shadow, 0, 1, thick + 1)
+            _trazar_mask(m_glow, 0, 0, thick + 4)
+            _trazar_mask(m_main, 0, 0, thick)
+
+            a_s = (m_shadow.astype(np.float32) * (115.0 / 65025.0))[:, :, None]
+            a_g = (m_glow.astype(np.float32) * (44.0 / 65025.0))[:, :, None]
+            a_m = (m_main.astype(np.float32) * (248.0 / 65025.0))[:, :, None]
+
+            w_accent = a_m + a_g * (1.0 - a_m)
+            w_shad = a_s * (1.0 - a_g) * (1.0 - a_m)
+            shad_layer = np.array([16.0, 10.0, 6.0], dtype=np.float32) * w_shad
+            cov_base = w_accent + w_shad
+            if len(_MASK_ESQ_CACHE) >= 32:
+                _MASK_ESQ_CACHE.clear()
+            cache_item = (q, w_accent, shad_layer, cov_base)
+            _MASK_ESQ_CACHE[clave_mask] = cache_item
+
+        q, w_accent, shad_layer, cov_base = cache_item
+        col_bgr = np.array([color[0], color[1], color[2]], dtype=np.float32)
+        premul = col_bgr * w_accent + shad_layer
+        cov = cov_base
+        if opacidad < 0.999:
+            premul = premul * opacidad
+            cov = cov_base * opacidad
+
+        # Volcar los 4 cuadrantes directamente sobre las esquinas de frame
+        alto_f, ancho_f = frame.shape[:2]
+        cuadrantes = [
+            (x1 - pad,     y1 - pad,     0, 0),
+            (x2 - L - 2,   y1 - pad,     q, 0),
+            (x1 - pad,     y2 - L - 2,   0, q),
+            (x2 - L - 2,   y2 - L - 2,   q, q),
+        ]
+        for fx, fy, qx, qy in cuadrantes:
+            fx1, fy1 = max(0, fx), max(0, fy)
+            fx2, fy2 = min(ancho_f, fx + q), min(alto_f, fy + q)
+            if fx2 <= fx1 or fy2 <= fy1:
+                continue
+            sx_a = qx + (fx1 - fx)
+            sy_a = qy + (fy1 - fy)
+            sx_b = sx_a + (fx2 - fx1)
+            sy_b = sy_a + (fy2 - fy1)
+            p_sub = premul[sy_a:sy_b, sx_a:sx_b]
+            a_sub = cov[sy_a:sy_b, sx_a:sx_b]
+            roi = frame[fy1:fy2, fx1:fx2].astype(np.float32)
+            frame[fy1:fy2, fx1:fx2] = np.clip(
+                p_sub + roi * (1.0 - a_sub), 0, 255).astype(np.uint8)
+
+    def _dibujar_linea_escaneo(self, frame, ax1, ay1, ax2, ay2, color, k, opacidad=1.0):
+        """Haz horizontal degradado con caída gaussiana y bordes suaves."""
+        opacidad = max(0.0, min(1.0, float(opacidad)))
+        if opacidad <= 0.01:
+            return
+        x1 = max(0, int(round(ax1)) + max(6, round(8 * k)))
+        x2 = min(frame.shape[1], int(round(ax2)) - max(6, round(8 * k)))
         y1 = int(round(ay1)) + max(10, round(12 * k))
         y2 = int(round(ay2)) - max(10, round(12 * k))
         if x2 <= x1 + 8 or y2 <= y1 + 12:
             return
         fase = 0.5 - 0.5 * math.cos(time.monotonic() * 2.8)
-        y_beam = int(round(y1 + (y2 - y1) * fase))
-        banda = max(6, round(8 * k))
-        self._rect_alpha(frame, x1, y_beam - banda // 2, x2 - x1, banda, color, 0.10)
-        self._rect_alpha(frame, x1, y_beam, x2 - x1, max(2, round(1.8 * k)), color, 0.34)
+        y_beam = y1 + (y2 - y1) * fase
+        sigma_halo = max(3.5, 5.0 * k)
+        sigma_core = max(1.0, 1.3 * k)
+        half_h = max(8, int(round(10 * k)))
+        ya = max(0, int(math.floor(y_beam - half_h)))
+        yb = min(frame.shape[0], int(math.ceil(y_beam + half_h)) + 1)
+        if yb <= ya:
+            return
+        ys = np.arange(ya, yb, dtype=np.float32)[:, None]
+        dy = ys - float(y_beam)
+        prof_v = (
+            0.20 * np.exp(-((dy / sigma_halo) ** 2))
+            + 0.48 * np.exp(-((dy / sigma_core) ** 2))
+        )
+        w_beam = x2 - x1
+        taper_h = (np.maximum(0.0, np.sin(np.pi * np.linspace(0.0, 1.0, w_beam, dtype=np.float32))) ** 0.65)[None, :]
+        alpha = np.clip(prof_v * taper_h * opacidad, 0.0, 0.85)[:, :, None]
+        col_bgr = np.array(color, dtype=np.float32).reshape(1, 1, 3)
+        roi = frame[ya:yb, x1:x2].astype(np.float32)
+        frame[ya:yb, x1:x2] = np.clip(
+            col_bgr * alpha + roi * (1.0 - alpha), 0, 255).astype(np.uint8)
 
-    def _tag(self, frame, cx, y_top, y_bot, titulo, detalle, color, progreso=None):
+    def _tag(self, frame, cx, y_top, y_bot, titulo, detalle, color,
+             progreso=None, confirmado=False, opacidad=1.0):
         """Píldora glassmórfica flotante centrada sobre el rostro con tipografía nítida."""
+        opacidad = max(0.0, min(1.0, float(opacidad)))
+        if opacidad <= 0.01:
+            return
         k = self._factor_metrica(frame)
         alto_f, ancho_f = frame.shape[:2]
         b, g, r = [int(v) for v in color]
@@ -502,13 +802,14 @@ class CamaraHilo(QThread):
         if _HAS_PIL and fuente_tit is not None:
             pad_x = max(10, round(12 * k))
             pad_y = max(7, round(8 * k))
-            dot_r = max(3, round(3.8 * k))
+            badge_r = max(6, round(6.5 * k)) if confirmado else max(4, round(4.2 * k))
+            ring_r = badge_r if confirmado else badge_r + max(2, round(2.5 * k))
             gap_dot = max(7, round(8 * k))
             gap_det = max(10, round(12 * k)) if detalle else 0
             hbar = max(4, round(4.5 * k)) if progreso is not None else 0
             gap_bar = max(6, round(6 * k)) if progreso is not None else 0
 
-            dummy = _PilDraw.Draw(_PilImage.new("RGBA", (1, 1)))
+            dummy = _HUD_MEASURE_DRAW
             bb_t = dummy.textbbox((0, 0), titulo, font=fuente_tit)
             tw, th = bb_t[2] - bb_t[0], bb_t[3] - bb_t[1]
             dw = dh = 0
@@ -516,66 +817,142 @@ class CamaraHilo(QThread):
                 bb_d = dummy.textbbox((0, 0), detalle, font=fuente_det)
                 dw, dh = bb_d[2] - bb_d[0], bb_d[3] - bb_d[1]
 
-            row_h = max(th, dh, dot_r * 2 + 2)
-            pw = pad_x + dot_r * 2 + gap_dot + tw + gap_det + dw + pad_x
+            row_h = max(th, dh, ring_r * 2 + 2)
+            pw = pad_x + ring_r * 2 + gap_dot + tw + gap_det + dw + pad_x
             ph = pad_y + row_h + gap_bar + hbar + pad_y
             pw = min(pw, max(80, ancho_f - 12))
 
-            img = _PilImage.new("RGBA", (pw, ph), (0, 0, 0, 0))
+            pad_s = max(3, round(3.5 * k))
+            cw = pw + pad_s * 2
+            ch = ph + pad_s * 2 + 2
+            img = _PilImage.new("RGBA", (cw, ch), (0, 0, 0, 0))
             draw = _PilDraw.Draw(img, "RGBA")
             rad = min(round(10 * k), ph // 2)
+            ox, oy = pad_s, pad_s
+
+            # Sombra difusa suave bajo la píldora
+            draw.rounded_rectangle(
+                [ox, oy + 2, ox + pw - 1, oy + 2 + ph - 1],
+                radius=rad, fill=(0, 0, 0, 90),
+            )
+
             # Fondo glass oscuro + borde fino en color de acento
             draw.rounded_rectangle(
-                [0, 0, pw - 1, ph - 1], radius=rad,
-                fill=(13, 18, 26, 220),
-                outline=(*accent_rgb, 155),
+                [ox, oy, ox + pw - 1, oy + ph - 1], radius=rad,
+                fill=(13, 18, 26, 226),
+                outline=(*accent_rgb, 170),
                 width=max(1, round(1.3 * k)),
             )
+            # Reflejo sutil en el borde interior superior
+            if ox + pw - rad - 1 > ox + rad:
+                draw.line(
+                    [(ox + rad, oy + 1), (ox + pw - rad - 1, oy + 1)],
+                    fill=(255, 255, 255, 22), width=1,
+                )
 
-            # Punto de estado
-            dot_cx = pad_x + dot_r
-            dot_cy = pad_y + row_h // 2
-            draw.ellipse(
-                [dot_cx - dot_r, dot_cy - dot_r, dot_cx + dot_r, dot_cy + dot_r],
-                fill=(*accent_rgb, 255),
-            )
+            # Indicador izquierdo antialias (2x supersampling)
+            ind_cx = ox + pad_x + ring_r
+            ind_cy = oy + pad_y + row_h // 2
+            slot_sz = ring_r * 2 + 4
+            ind_img = _PilImage.new("RGBA", (slot_sz * 2, slot_sz * 2), (0, 0, 0, 0))
+            ind_draw = _PilDraw.Draw(ind_img, "RGBA")
+            ic = float(slot_sz)
+            if confirmado:
+                br2 = badge_r * 2.0
+                ind_draw.ellipse(
+                    [ic - br2, ic - br2, ic + br2, ic + br2],
+                    fill=(*accent_rgb, 255),
+                )
+                chk_pts = [
+                    (ic - br2 * 0.42, ic + br2 * 0.04),
+                    (ic - br2 * 0.08, ic + br2 * 0.36),
+                    (ic + br2 * 0.44, ic - br2 * 0.32),
+                ]
+                ind_draw.line(
+                    chk_pts, fill=(10, 20, 16, 255),
+                    width=max(3, round(3.4 * k)), joint="curve",
+                )
+            elif progreso is not None:
+                pulse = 0.5 + 0.5 * math.sin(time.monotonic() * 5.0)
+                pr2 = (badge_r + max(2, round((1.8 + 1.2 * pulse) * k))) * 2.0
+                br2 = badge_r * 2.0
+                ind_draw.ellipse(
+                    [ic - pr2, ic - pr2, ic + pr2, ic + pr2],
+                    fill=(*accent_rgb, int(55 + 90 * pulse)),
+                )
+                ind_draw.ellipse(
+                    [ic - br2, ic - br2, ic + br2, ic + br2],
+                    fill=(*accent_rgb, 255),
+                )
+            else:
+                rr2 = ring_r * 2.0
+                br2 = badge_r * 2.0
+                ind_draw.ellipse(
+                    [ic - rr2, ic - rr2, ic + rr2, ic + rr2],
+                    fill=(*accent_rgb, 65),
+                )
+                ind_draw.ellipse(
+                    [ic - br2, ic - br2, ic + br2, ic + br2],
+                    fill=(*accent_rgb, 255),
+                )
+            ind_aa = ind_img.resize((slot_sz, slot_sz), _PilImage.Resampling.BILINEAR)
+            img.paste(ind_aa, (int(round(ind_cx - slot_sz / 2)), int(round(ind_cy - slot_sz / 2))), ind_aa)
 
             # Nombre del alumno
-            tx = pad_x + dot_r * 2 + gap_dot
-            ty = pad_y + (row_h - th) // 2 - bb_t[1]
+            tx = ox + pad_x + ring_r * 2 + gap_dot
+            ty = oy + pad_y + (row_h - th) // 2 - bb_t[1]
             draw.text((tx, ty), titulo, font=fuente_tit, fill=(248, 250, 252, 255))
 
             # Porcentaje o estado a la derecha
             if detalle:
-                dx = pw - pad_x - dw
-                dy = pad_y + (row_h - dh) // 2 - bb_d[1]
+                dx = ox + pw - pad_x - dw
+                dy = oy + pad_y + (row_h - dh) // 2 - bb_d[1]
                 draw.text((dx, dy), detalle, font=fuente_det, fill=(*accent_rgb, 255))
 
-            # Barra de progreso redondeada integrada en la parte inferior
+            # Barra de progreso redondeada sólida con degradado teal -> menta
             if progreso is not None:
-                bx1 = pad_x
-                bx2 = pw - pad_x
-                by1 = pad_y + row_h + gap_bar
+                bx1 = ox + pad_x
+                bx2 = ox + pw - pad_x
+                by1 = oy + pad_y + row_h + gap_bar
                 by2 = by1 + hbar
                 br = hbar // 2
                 draw.rounded_rectangle(
-                    [bx1, by1, bx2, by2], radius=br, fill=(52, 63, 78, 235))
+                    [bx1, by1, bx2, by2], radius=br, fill=(48, 59, 74, 235))
                 frac = min(max(float(progreso), 0.0), 1.0)
-                fill_w = max(hbar, int(round((bx2 - bx1) * frac)))
                 if frac > 0.005:
-                    draw.rounded_rectangle(
-                        [bx1, by1, min(bx2, bx1 + fill_w), by2],
-                        radius=br, fill=(*accent_rgb, 255))
+                    fill_w = max(hbar, int(round((bx2 - bx1) * frac)))
+                    fx2 = min(bx2, bx1 + fill_w)
+                    fw = max(1, fx2 - bx1 + 1)
+                    fh = max(1, by2 - by1 + 1)
+                    light_rgb = tuple(min(255, int(c + (255 - c) * 0.36)) for c in accent_rgb)
+                    grad_row = np.zeros((1, fw, 4), dtype=np.uint8)
+                    t_grad = np.linspace(0.0, 1.0, fw, dtype=np.float32)
+                    for ch_i in range(3):
+                        grad_row[0, :, ch_i] = np.clip(
+                            accent_rgb[ch_i] * (1.0 - t_grad) + light_rgb[ch_i] * t_grad,
+                            0, 255,
+                        ).astype(np.uint8)
+                    grad_row[0, :, 3] = 255
+                    grad_img = _PilImage.fromarray(np.repeat(grad_row, fh, axis=0), "RGBA")
+                    mask = _PilImage.new("L", (fw, fh), 0)
+                    _PilDraw.Draw(mask).rounded_rectangle(
+                        [0, 0, fw - 1, fh - 1], radius=br, fill=255)
+                    img.paste(grad_img, (bx1, by1), mask)
+
+            arr = np.array(img)
+            if opacidad < 0.995:
+                arr[:, :, 3] = np.clip(
+                    arr[:, :, 3].astype(np.float32) * opacidad, 0, 255).astype(np.uint8)
 
             gap_box = max(8, round(10 * k))
-            x = int(round(cx - pw / 2.0))
-            x = min(max(6, x), max(6, ancho_f - pw - 6))
-            y = int(round(y_top)) - ph - gap_box
-            if y < 6:
-                y = int(round(y_bot)) + gap_box
-                if y + ph > alto_f - 6:
-                    y = max(6, alto_f - ph - 6)
-            self._componer_rgba(frame, x, y, np.array(img))
+            x = int(round(cx - pw / 2.0)) - ox
+            x = min(max(6 - ox, x), max(6 - ox, ancho_f - pw - 6 - ox))
+            y = int(round(y_top)) - ph - gap_box - oy
+            if y + oy < 6:
+                y = int(round(y_bot)) + gap_box - oy
+                if y + oy + ph > alto_f - 6:
+                    y = max(6 - oy, alto_f - ph - 6 - oy)
+            self._componer_rgba(frame, x, y, arr)
             return
 
         # Fallback OpenCV si Pillow/fuente no estuviera disponible
@@ -589,18 +966,21 @@ class CamaraHilo(QThread):
         ancho = tw + pad_x * 2
         x = min(max(6, int(round(cx - ancho / 2.0))), max(6, ancho_f - ancho - 6))
         y = max(6, int(round(y_top)) - alto - round(8 * k))
-        self._rect_alpha(frame, x, y, ancho, alto, CHIP_FONDO, 0.84)
+        self._rect_alpha(frame, x, y, ancho, alto, CHIP_FONDO, 0.84 * opacidad)
         cv2.putText(frame, texto, (x + pad_x, y + (alto - hbar - th - base) // 2 + th),
                     cv2.FONT_HERSHEY_SIMPLEX, escala, CHIP_TEXTO, grosor, cv2.LINE_AA)
         if progreso is not None:
             ystrip = y + alto - hbar
             wfill = max(round(2 * k), int(ancho * min(max(progreso, 0.0), 1.0)))
-            self._rect_alpha(frame, x, ystrip, wfill, hbar, color, 1.0)
+            self._rect_alpha(frame, x, ystrip, wfill, hbar, color, opacidad)
 
     def _dibujar(self, frame, detecciones):
         """Dibuja el overlay moderno: esquinas curvas, línea de escaneo y píldora glass."""
         k = self._factor_metrica(frame)
         for det in detecciones:
+            opacidad = max(0.0, min(1.0, float(det.get("opacidad", 1.0))))
+            if opacidad <= 0.01:
+                continue
             x1, y1, x2, y2 = [float(v) for v in det["caja"]]
             m = 10 * k
             ax1, ay1, ax2, ay2 = x1 - m, y1 - m, x2 + m, y2 + m
@@ -608,19 +988,23 @@ class CamaraHilo(QThread):
             confirmado = bool(det.get("confirmado"))
             prog = det.get("progreso")
 
-            if ident and confirmado:
-                color = COLOR_CONFIRM
-            elif ident:
-                color = COLOR_IDENT
-            else:
-                color = COLOR_DESC
+            color = det.get("color")
+            if color is None:
+                if ident and confirmado:
+                    color = COLOR_CONFIRM
+                elif ident:
+                    color = COLOR_IDENT
+                else:
+                    color = COLOR_DESC
 
             # Esquinas curvas estilo FaceID
-            self._dibujar_esquinas_redondeadas(frame, ax1, ay1, ax2, ay2, color, k)
+            self._dibujar_esquinas_redondeadas(
+                frame, ax1, ay1, ax2, ay2, color, k, opacidad=opacidad)
 
             # Haz de escaneo sutil mientras se verifica
             if ident and not confirmado and prog is not None:
-                self._dibujar_linea_escaneo(frame, ax1, ay1, ax2, ay2, color, k)
+                self._dibujar_linea_escaneo(
+                    frame, ax1, ay1, ax2, ay2, color, k, opacidad=opacidad)
 
             # Texto de la píldora flotante
             nombre_raw = str(det.get("nombre") or "").strip() if ident else "Rostro no registrado"
@@ -642,7 +1026,9 @@ class CamaraHilo(QThread):
                 detalle, progreso_bar = "", None
 
             cx = (ax1 + ax2) / 2.0
-            self._tag(frame, cx, ay1, ay2, nombre_txt, detalle, color, progreso_bar)
+            self._tag(
+                frame, cx, ay1, ay2, nombre_txt, detalle, color,
+                progreso_bar, confirmado=confirmado, opacidad=opacidad)
 
     def _es_url_http(self, fuente):
         return isinstance(fuente, str) and fuente.lower().startswith(("http://", "https://", "tcp://"))
@@ -1039,28 +1425,24 @@ class CamaraHilo(QThread):
                 "confirmado": confirmado,
             })
 
-        # El overlay se dibuja a resolucion de visualizacion: el frame se
-        # escala a la caja del QLabel de la UI y las cajas lo acompanan.
-        # Inicializar tracker con la primera deteccion (coords originales).
-        if detecciones:
-            try:
-                caja = detecciones[0]["caja"]
-                x1, y1, x2, y2 = [int(v) for v in caja]
-                self._tracker = cv2.TrackerKCF_create()
-                self._tracker.init(frame, (x1, y1, x2 - x1, y2 - y1))
-                self._tracker_ok = True
-            except Exception:
-                self._tracker = None
-                self._tracker_ok = False
-        else:
-            self._tracker = None
-            self._tracker_ok = False
+        mostrar, detecciones_disp = self._preparar_display(anotado, detecciones)
+        mh, mw = mostrar.shape[:2]
+        mw_safe, mh_safe = max(1, mw), max(1, mh)
+        dets_norm = []
+        for det in detecciones_disp:
+            x1, y1, x2, y2 = det["caja"]
+            d = dict(det)
+            d["caja_norm"] = (
+                x1 / float(mw_safe), y1 / float(mh_safe),
+                x2 / float(mw_safe), y2 / float(mh_safe),
+            )
+            dets_norm.append(d)
+        self._suavizador.actualizar_objetivos(dets_norm, self.confirm_seg)
 
-        mostrar, detecciones = self._preparar_display(anotado, detecciones)
-        self._dibujar(mostrar, detecciones)
+        self._dibujar(mostrar, detecciones_disp)
         self._ultimo_frame = mostrar
         self._ultimo_frame_ts = time.time()
-        self._ultimas_detecciones = detecciones
+        self._ultimas_detecciones = detecciones_disp
 
     @property
     def frame_actual(self):
