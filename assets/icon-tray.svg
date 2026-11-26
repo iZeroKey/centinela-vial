@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="24" height="24">
+  <g fill="#FFFFFF">
+    <!-- Primera "C" -->
+    <rect x="6.9" y="9.4" width="4.2" height="4.2" />
+    <rect x="11.9" y="9.4" width="4.2" height="4.2" />
+    <rect x="1.9" y="14.4" width="4.2" height="4.2" />
+    <rect x="16.9" y="14.4" width="4.2" height="4.2" />
+    <rect x="1.9" y="19.4" width="4.2" height="4.2" />
+    <rect x="1.9" y="24.4" width="4.2" height="4.2" />
+    <rect x="1.9" y="29.4" width="4.2" height="4.2" />
+    <rect x="16.9" y="29.4" width="4.2" height="4.2" />
+    <rect x="6.9" y="34.4" width="4.2" height="4.2" />
+    <rect x="11.9" y="34.4" width="4.2" height="4.2" />
+
+    <!-- Segunda "C" -->
+    <rect x="31.9" y="9.4" width="4.2" height="4.2" />
+    <rect x="36.9" y="9.4" width="4.2" height="4.2" />
+    <rect x="26.9" y="14.4" width="4.2" height="4.2" />
+    <rect x="41.9" y="14.4" width="4.2" height="4.2" />
+    <rect x="26.9" y="19.4" width="4.2" height="4.2" />
+    <rect x="26.9" y="24.4" width="4.2" height="4.2" />
+    <rect x="26.9" y="29.4" width="4.2" height="4.2" />
+    <rect x="41.9" y="29.4" width="4.2" height="4.2" />
+    <rect x="31.9" y="34.4" width="4.2" height="4.2" />
+    <rect x="36.9" y="34.4" width="4.2" height="4.2" />
+  </g>
+</svg>

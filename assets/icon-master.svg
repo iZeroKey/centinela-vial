@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- Fondo negro puro (usa rx="0" para App Store / Google Play) -->
+  <rect width="1024" height="1024" rx="224" fill="#000000" />
+
+  <!-- Monograma terminal "CC" (retícula 9x6, bloque: 54px, gap: 10px) -->
+  <g fill="#4ADE80">
+    <!-- Primera "C" -->
+    <rect x="293" y="325" width="54" height="54" />
+    <rect x="357" y="325" width="54" height="54" />
+    <rect x="229" y="389" width="54" height="54" />
+    <rect x="421" y="389" width="54" height="54" />
+    <rect x="229" y="453" width="54" height="54" />
+    <rect x="229" y="517" width="54" height="54" />
+    <rect x="229" y="581" width="54" height="54" />
+    <rect x="421" y="581" width="54" height="54" />
+    <rect x="293" y="645" width="54" height="54" />
+    <rect x="357" y="645" width="54" height="54" />
+
+    <!-- Segunda "C" -->
+    <rect x="613" y="325" width="54" height="54" />
+    <rect x="677" y="325" width="54" height="54" />
+    <rect x="549" y="389" width="54" height="54" />
+    <rect x="741" y="389" width="54" height="54" />
+    <rect x="549" y="453" width="54" height="54" />
+    <rect x="549" y="517" width="54" height="54" />
+    <rect x="549" y="581" width="54" height="54" />
+    <rect x="741" y="581" width="54" height="54" />
+    <rect x="613" y="645" width="54" height="54" />
+    <rect x="677" y="645" width="54" height="54" />
+  </g>
+</svg>

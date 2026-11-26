@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 566 374" fill="currentColor">
+  <!-- Primera "C" -->
+  <rect x="64" y="0" width="54" height="54" />
+  <rect x="128" y="0" width="54" height="54" />
+  <rect x="0" y="64" width="54" height="54" />
+  <rect x="192" y="64" width="54" height="54" />
+  <rect x="0" y="128" width="54" height="54" />
+  <rect x="0" y="192" width="54" height="54" />
+  <rect x="0" y="256" width="54" height="54" />
+  <rect x="192" y="256" width="54" height="54" />
+  <rect x="64" y="320" width="54" height="54" />
+  <rect x="128" y="320" width="54" height="54" />
+
+  <!-- Segunda "C" -->
+  <rect x="384" y="0" width="54" height="54" />
+  <rect x="448" y="0" width="54" height="54" />
+  <rect x="320" y="64" width="54" height="54" />
+  <rect x="512" y="64" width="54" height="54" />
+  <rect x="320" y="128" width="54" height="54" />
+  <rect x="320" y="192" width="54" height="54" />
+  <rect x="320" y="256" width="54" height="54" />
+  <rect x="512" y="256" width="54" height="54" />
+  <rect x="384" y="320" width="54" height="54" />
+  <rect x="448" y="320" width="54" height="54" />
+</svg>
