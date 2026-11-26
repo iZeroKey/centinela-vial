@@ -1,13 +1,21 @@
 {
   "host_lcd": "centinela-lcd.local",
+  "lcd_animacion": {
+    "activa": true,
+    "velocidad": 1.0,
+    "estilo_barra": "bloques",
+    "marquesina": true,
+    "iconos_ascii": true,
+    "destello_confirmado": true
+  },
   "camaras": [
     {
       "id": "cam_1",
       "nombre": "Webcam",
       "tipo": "local",
-      "fuente": "0",
+      "fuente": "1",
       "curso": "GESTION DE INTERNET DE LAS COSAS",
-      "activa": true,
+      "activa": false,
       "intervalo_proceso": 0.1
     },
     {
@@ -16,8 +24,28 @@
       "tipo": "http",
       "fuente": "http://centinela-cam.local:81/stream",
       "curso": "GESTION DE INTERNET DE LAS COSAS",
-      "activa": false,
+      "activa": true,
       "intervalo_proceso": 0.1
+    },
+    {
+      "id": "cam_3",
+      "nombre": "Celular",
+      "tipo": "telefono",
+      "fuente": "399ac985-4c36-4571-8cad-7188976e636f",
+      "curso": "GESTION DE INTERNET DE LAS COSAS",
+      "activa": false,
+      "intervalo_proceso": 0.1,
+      "recorte_aspecto": "Original"
+    },
+    {
+      "id": "cam_4",
+      "nombre": "Laptop Cam",
+      "tipo": "local",
+      "fuente": "0",
+      "curso": "GESTION DE INTERNET DE LAS COSAS",
+      "activa": false,
+      "intervalo_proceso": 0.1,
+      "recorte_aspecto": "Original"
     }
   ],
   "cursos": [
@@ -57,6 +85,7 @@
     "umbral_lcd_nombre": 0.3,
     "duracion_resultado_lcd": 3.0,
     "modo_escaneo": "uno",
+    "procesar_cada_n": 1,
     "tolerancia_tardanza_min": 5,
     "aplicar_horarios": false
   },
